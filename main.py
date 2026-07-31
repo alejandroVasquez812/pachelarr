@@ -1,4 +1,5 @@
 import os
+from dotenv import load_dotenv
 import asyncio
 from datetime import datetime, timezone
 import logging
@@ -8,6 +9,7 @@ from lxml import etree as ET
 from urllib.parse import urljoin, parse_qs, unquote
 
 app = FastAPI()
+load_dotenv()
 PACHELARR_LOG_LEVEL = os.getenv("PACHELARR_LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, PACHELARR_LOG_LEVEL, logging.INFO))
 logger = logging.getLogger("pachelarr")
@@ -423,12 +425,41 @@ async def search_prowlarr(session, search_kwargs):
                 logger.debug(f"Skipping indexerIds param for Prowlarr search (total {len(idxs)}) to avoid URL/size issues")
         if 'type' in search_kwargs:
             params['type'] = search_kwargs['type']
-        # Include all supported identifier parameters from Torznab spec
-        for k in ('rid', 'tvdbid', 'season', 'ep', 'imdbid', 'tmdbid', 'tvmaze', 'traktid', 'doubanid'):
-            if k in search_kwargs and search_kwargs[k]:
-                params[k] = search_kwargs[k]
-        # Check if we have any identifiers in the params we're sending to Prowlarr
-        has_identifier = any(params.get(k) for k in ('rid', 'tvdbid', 'imdbid', 'tmdbid', 'tvmaze', 'traktid', 'doubanid'))
+        # Prowlarr's /api/v1/search binds only Query/Type/Categories/IndexerIds/
+        # Limit/Offset. IDs (imdbid, tmdbid, etc.) must be embedded as
+        # {key:value} tokens inside the query string, where QueryToParams()
+        # parses them (only for type=movie and type=tvsearch) and strips the
+        # braces. Sending them as separate query params is silently dropped.
+        search_type = params.get('type', search_kwargs.get('type', 'search'))
+        tokens = []
+        if search_type == 'movie':
+            for k in ('imdbid', 'tmdbid', 'traktid', 'doubanid'):
+                v = search_kwargs.get(k)
+                if v:
+                    tokens.append(f"{{{k}:{v}}}")
+        elif search_type == 'tvsearch':
+            # Map our Torznab field names to Prowlarr token keys.
+            key_map = {
+                'imdbid': 'imdbid',
+                'tmdbid': 'tmdbid',
+                'tvdbid': 'tvdbid',
+                'rid': 'rid',
+                'tvmaze': 'tvmazeid',
+                'traktid': 'traktid',
+                'doubanid': 'doubanid',
+                'season': 'season',
+                'ep': 'episode',
+            }
+            for our_k, prowl_k in key_map.items():
+                v = search_kwargs.get(our_k)
+                if v:
+                    tokens.append(f"{{{prowl_k}:{v}}}")
+        if tokens:
+            base_query = params.get('query', '') or ''
+            params['query'] = (base_query + ' ' + ' '.join(tokens)).strip()
+            logger.debug(f"Embedded {len(tokens)} ID token(s) into Prowlarr query")
+        # Check if we have any identifiers in the search kwargs we're sending to Prowlarr
+        has_identifier = any(search_kwargs.get(k) for k in ('rid', 'tvdbid', 'imdbid', 'tmdbid', 'tvmaze', 'traktid', 'doubanid', 'season', 'ep'))
         # If outgoing params don't include a query but categories/indexerIds are present
         # then this is likely a category-only call from a client like Sonarr. If the
         # caller enabled a fallback query via env var, use it to avoid a 400 from
