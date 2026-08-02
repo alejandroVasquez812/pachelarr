@@ -1,6 +1,20 @@
 def test_search_prowlarr_does_not_forward_limit_zero(monkeypatch):
     import main as m
 
+    # One fully-capable indexer so the per-indexer wrapper issues a real search
+    # GET. The module-level indexer cache persists across tests; clear it so
+    # this test refetches the FakeSession's indexer list.
+    m._INDEXERS_CACHE.clear()
+    _capable = {
+        'id': 1, 'enable': True, 'supportsSearch': True,
+        'capabilities': {
+            'searchParams': ['q'],
+            'movieSearchParams': ['q', 'imdbId', 'tmdbId', 'traktId', 'doubanId'],
+            'tvSearchParams': ['q', 'season', 'ep', 'imdbId', 'tvdbId', 'rId', 'tvMazeId', 'traktId', 'tmdbId', 'doubanId'],
+            'categories': [{'id': 5030}, {'id': 5040}],
+        },
+    }
+
     class FakeCtx:
         def __init__(self, status, data):
             self.status = status
@@ -25,6 +39,8 @@ def test_search_prowlarr_does_not_forward_limit_zero(monkeypatch):
             self.last_headers = None
 
         def get(self, url, headers=None, params=None):
+            if url.endswith('/api/v1/indexer'):
+                return FakeCtx(200, [dict(_capable)])
             self.last_params = params
             self.last_headers = headers
             return FakeCtx(200, [])

@@ -226,7 +226,7 @@ def test_generate_torznab_uses_uncached_seeders():
         }
     ]
     cached = {}
-    uncached_seeders = {'abc123': 50}
+    uncached_seeders = {'abc123': {'seeders': 50, 'leechers': 0}}
     xml = generate_torznab_xml(sample, cached, uncached_seeders)
     # parse xml to find seeders
     import re
@@ -313,24 +313,32 @@ def test_generate_torznab_enclosure_populated():
 
 @pytest.mark.asyncio
 async def test_scrape_trackers_inverted_max(monkeypatch):
-    # Setup a fake _udp_scrape_one to return different seeders per tracker
+    # Setup a fake _udp_scrape_tracker to return different seeders per tracker.
+    # scrape_trackers_inverted now routes through the per-tracker connection-reuse
+    # helper rather than _udp_scrape_one directly.
     from main import scrape_trackers_inverted
-    async def fake_udp_scrape(host, port, hashes, timeout=5.0):
+    import main as m
+    m._SCRAPE_CACHE.clear()
+
+    async def fake_udp_scrape_tracker(host, port, chunks, timeout):
+        # Flatten chunks into a single hash list for the fake's convenience.
+        hashes = [h for chunk in chunks for h in chunk]
         # For tracker1 return abc1:5, abc2:4. For tracker2 return abc1:10
         if host.endswith('tracker1'):
-            return {h: (5 if h=='abc1' else 4) for h in hashes}
+            return {h: {'seeders': (5 if h == 'abc1' else 4), 'leechers': 0, 'downloads': 0} for h in hashes}
         if host.endswith('tracker2'):
-            return {h: (10 if h=='abc1' else 0) for h in hashes}
+            return {h: {'seeders': (10 if h == 'abc1' else 0), 'leechers': 0, 'downloads': 0} for h in hashes}
         return {}
 
-    monkeypatch.setattr('main._udp_scrape_one', fake_udp_scrape)
+    monkeypatch.setattr('main._udp_scrape_tracker', fake_udp_scrape_tracker)
     tracker_map = {
         'udp://tracker1:6969/announce': ['abc1', 'abc2'],
         'udp://tracker2:6969/announce': ['abc1']
     }
     out = await scrape_trackers_inverted(tracker_map)
-    assert out['abc1'] == 10
-    assert out['abc2'] == 4
+    # Per-metric max aggregation across trackers.
+    assert out['abc1']['seeders'] == 10
+    assert out['abc2']['seeders'] == 4
 
     def test_consolidate_all_items_union_and_canonical():
         from main import consolidate_all_items
@@ -342,7 +350,7 @@ async def test_scrape_trackers_inverted_max(monkeypatch):
         ]
         cached_status = {}
         # Simulate tracker scraping found 20 seeders for the uncached hash
-        uncached_seeders = {'abc123': 20}
+        uncached_seeders = {'abc123': {'seeders': 20, 'leechers': 0}}
         out = consolidate_all_items(sample, cached_status, uncached_seeders)
         # One consolidated item should be returned
         assert len(out) == 1
@@ -545,8 +553,8 @@ async def test_scrape_trackers_inverted_max(monkeypatch):
         assert 'abc123' in cached_status and cached_status['abc123'] is True
 
         # Consolidate and then generate XML: apply uncached seeders for DEF456
-        conc = consolidate_all_items(sample, cached_status, {'def456': 7})
-        xml = generate_torznab_xml(conc, cached_status, {'def456': 7})
+        conc = consolidate_all_items(sample, cached_status, {'def456': {'seeders': 7, 'leechers': 0}})
+        xml = generate_torznab_xml(conc, cached_status, {'def456': {'seeders': 7, 'leechers': 0}})
         decoded = xml.decode()
         # There should be two items (one per unique hash)
         assert decoded.count('<item>') == 2

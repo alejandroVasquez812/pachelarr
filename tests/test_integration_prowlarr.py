@@ -1006,11 +1006,11 @@ def test_search_prowlarr_fallback_and_categories_list(monkeypatch):
         # Update module var reference (the module reads it at import-time)
         m.CACHEBOX_TEST_FALLBACK_QUERY = 'a'
 
-    session = FakeSession()
-    kwargs = {'categories': ['5030', '5040']}
-        # Call the function under test
-    import asyncio
-    res = asyncio.get_event_loop().run_until_complete(m.search_prowlarr(session, kwargs))
+        session = FakeSession()
+        kwargs = {'categories': ['5030', '5040']}
+            # Call the function under test
+        import asyncio
+        res = asyncio.get_event_loop().run_until_complete(m.search_prowlarr(session, kwargs))
         # Ensure get was called and params show categories as list and query is fallback 'a'
         assert session.last_params is not None
         assert session.last_params.get('query') == 'a'
@@ -1045,10 +1045,10 @@ def test_search_prowlarr_forwards_paging(monkeypatch):
                 self.last_headers = headers
                 return FakeCtx(200, [])
 
-    session = FakeSession()
-    kwargs = {'query': 'Love Death and Robots', 'limit': '100', 'offset': '0', 'categories': ['5030', '5040']}
-    import asyncio
-    asyncio.get_event_loop().run_until_complete(m.search_prowlarr(session, kwargs))
+        session = FakeSession()
+        kwargs = {'query': 'Love Death and Robots', 'limit': '100', 'offset': '0', 'categories': ['5030', '5040']}
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(m.search_prowlarr(session, kwargs))
         assert session.last_params.get('limit') == '100'
         assert session.last_params.get('offset') == '0'
 
@@ -1080,10 +1080,10 @@ def test_search_prowlarr_does_not_forward_limit_zero(monkeypatch):
                 self.last_headers = headers
                 return FakeCtx(200, [])
 
-    session = FakeSession()
-    kwargs = {'query': 'Love Death and Robots', 'limit': '0', 'offset': '0', 'categories': ['5030', '5040']}
-    import asyncio
-    asyncio.get_event_loop().run_until_complete(m.search_prowlarr(session, kwargs))
+        session = FakeSession()
+        kwargs = {'query': 'Love Death and Robots', 'limit': '0', 'offset': '0', 'categories': ['5030', '5040']}
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(m.search_prowlarr(session, kwargs))
         assert session.last_params.get('limit') is None
 
 
@@ -1100,8 +1100,8 @@ def test_handle_search_forwards_limit_offset(monkeypatch):
 
         monkeypatch.setattr('main.search_prowlarr', fake_search)
         params = QueryParams({'cat': '5030,5040', 't': 'tvsearch', 'limit': '100', 'offset': '0'})
-    import asyncio
-    resp = asyncio.get_event_loop().run_until_complete(m.handle_search(params))
+        import asyncio
+        resp = asyncio.get_event_loop().run_until_complete(m.handle_search(params))
         assert resp.body is not None
         assert '<item>' in resp.body.decode()
 
@@ -1125,8 +1125,8 @@ def test_handle_search_category_only_fallback_returns_nonempty_xml(monkeypatch):
         # Build a fake request params with categories but no q
         params = QueryParams({'cat': '5030,5040', 't': 'tvsearch'})
         # call handle_search directly (it's async)
-    import asyncio
-    resp = asyncio.get_event_loop().run_until_complete(m.handle_search(params))
+        import asyncio
+        resp = asyncio.get_event_loop().run_until_complete(m.handle_search(params))
         # The response should be an XML string (bytes) and not be the empty feed
         assert resp.body is not None
         xml = resp.body.decode()
