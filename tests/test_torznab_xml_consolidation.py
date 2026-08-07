@@ -7,12 +7,12 @@ consolidate_all_items / generate_torznab_xml pair. Inputs are
 
 Run from the repo root so `import main` resolves.
 """
-from urllib.parse import unquote, parse_qs
+from urllib.parse import parse_qs, unquote
 
 from lxml import etree as ET
 
 import main as m
-from tests._torznab_helpers import build_item, build_rss, empty_rss, indexer, pair
+from tests._torznab_helpers import build_item, build_rss, pair
 
 _TORZNAB = "{http://torznab.com/schemas/2015/feed}"
 

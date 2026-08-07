@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: install-dev test docker-build-dev docker-test
+.PHONY: install-dev test docker-build-dev docker-test lint format
 
 install-dev:
 	@if command -v poetry >/dev/null 2>&1; then \
@@ -11,6 +11,13 @@ install-dev:
 
 test:
 	python3 -m pytest -q -s
+
+lint:
+	ruff check .
+
+format:
+	ruff format .
+	ruff check --fix .
 
 docker-build-dev:
 	docker compose build --build-arg INSTALL_DEV_DEPS=true

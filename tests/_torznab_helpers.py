@@ -7,7 +7,7 @@ Torznab passthrough returns, so tests can feed ``consolidate_and_emit_xml`` and
 from lxml import etree as ET
 
 _TORZNAB_NS = "http://torznab.com/schemas/2015/feed"
-_TORZNAB_PREFIX = "{%s}" % _TORZNAB_NS
+_TORZNAB_PREFIX = f"{{{_TORZNAB_NS}}}"
 
 
 def _attr(name, value):
@@ -46,7 +46,7 @@ def build_item(item):
     if magnet is None and h is not None:
         trackers = item.get("trackers") or []
         trs = "".join("&tr=" + t for t in trackers)
-        magnet = "magnet:?xt=urn:btih:%s%s" % (h, trs)
+        magnet = f"magnet:?xt=urn:btih:{h}{trs}"
 
     link = item.get("link")
     if link is None and magnet is not None:

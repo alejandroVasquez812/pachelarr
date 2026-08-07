@@ -9,7 +9,7 @@ Run from the repo root so `import main` resolves.
 import asyncio
 import json
 import re
-from urllib.parse import unquote, parse_qs
+from urllib.parse import parse_qs, unquote
 
 import aiohttp
 from lxml import etree as ET

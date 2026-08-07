@@ -1,16 +1,17 @@
+import asyncio
+import logging
 import os
-import time
 import socket
+import time
 from collections import OrderedDict
 from contextlib import asynccontextmanager
-from dotenv import load_dotenv
-import asyncio
 from datetime import datetime, timezone
-import logging
-from fastapi import FastAPI, Request, Response
+from urllib.parse import parse_qs, unquote, urljoin
+
 import aiohttp
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request, Response
 from lxml import etree as ET
-from urllib.parse import urljoin, parse_qs, unquote
 
 load_dotenv()
 PACHELARR_LOG_LEVEL = os.getenv("PACHELARR_LOG_LEVEL", "INFO").upper()
@@ -95,20 +96,20 @@ torbox_misses = 0
 
 async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, rid=None, search_type='movie'):
     """Look up movie/TV title from external IDs using TMDB API.
-    
+
     TMDB supports:
     - IMDb IDs (movies and TV shows)
     - TVDB IDs (TV shows)
     - TVRage IDs (TV shows, deprecated)
     - Direct TMDB IDs (movies and TV shows)
-    
+
     Requires TMDB_API_KEY environment variable.
     Get a free API key at: https://www.themoviedb.org/settings/api
     """
     if not TMDB_API_KEY:
-        logger.debug("TMDB_API_KEY not configured, skipping title lookup. Set TMDB_API_KEY env var to enable ID-based search support.")
+        logger.debug("TMDB_API_KEY not configured, skipping title lookup. Set TMDB_API_KEY env var to enable ID-based search support.")  # noqa: E501
         return None
-    
+
     try:
         # Try IMDb ID lookup (works for both movies and TV)
         if imdbid:
@@ -140,7 +141,7 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
                         elif title:
                             logger.info(f"Successfully looked up TV show via TMDB (IMDb): {title}")
                             return title
-        
+
         # Try TVDB ID lookup (TV shows only)
         if tvdbid:
             url = f"https://api.themoviedb.org/3/find/{tvdbid}?api_key={TMDB_API_KEY}&external_source=tvdb_id"
@@ -158,7 +159,7 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
                         elif title:
                             logger.info(f"Successfully looked up TV show via TMDB (TVDB): {title}")
                             return title
-        
+
         # Try TVRage ID lookup (deprecated but still supported by TMDB)
         if rid:
             url = f"https://api.themoviedb.org/3/find/{rid}?api_key={TMDB_API_KEY}&external_source=tvrage_id"
@@ -176,7 +177,7 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
                         elif title:
                             logger.info(f"Successfully looked up TV show via TMDB (TVRage): {title}")
                             return title
-        
+
         # Direct TMDB ID lookup
         if tmdbid:
             # Determine if it's a movie or TV show based on search type
@@ -209,7 +210,7 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
                         elif title:
                             logger.info(f"Successfully looked up TV show via TMDB (TMDB ID): {title}")
                             return title
-        
+
         logger.debug(f"Could not lookup title for imdbid={imdbid} tmdbid={tmdbid} tvdbid={tvdbid} rid={rid}")
         return None
     except Exception as e:
@@ -617,7 +618,7 @@ def build_per_indexer_params(indexer, search_kwargs):
         and not params.get('categories')
     ):
         logger.debug(
-            f"build_per_indexer_params: skipping indexer {idx_id} (q-only, no query/title, no supported IDs, no categories)"
+            f"build_per_indexer_params: skipping indexer {idx_id} (q-only, no query/title, no supported IDs, no categories)"  # noqa: E501
         )
         return None
 
@@ -665,7 +666,7 @@ async def torznab_proxy(request: Request):
         except Exception:
             logger.exception("Unhandled error in search handler")
             return Response(status_code=500, content="Internal Server Error")
-    
+
     return Response(status_code=400, content="Invalid request type")
 
 
@@ -722,7 +723,7 @@ async def _handle_search_impl(params, session):
     # If query is missing but categories are present and a fallback is configured,
     # substitute it early so downstream logic picks it up. Don't apply fallback if identifiers are present.
     if not query and not has_identifier and params.get('cat'):
-        logger.info(f"Incoming category-only request detected; applying fallback query '{PACHELARR_TEST_FALLBACK_QUERY}'")
+        logger.info(f"Incoming category-only request detected; applying fallback query '{PACHELARR_TEST_FALLBACK_QUERY}'")  # noqa: E501
     categories = [cat for cat in params.get('cat', '').split(',') if cat]
 
     # Build search parameters for Prowlarr; include tvdbid, season, ep, rid, imdbid when present
@@ -765,7 +766,7 @@ async def _handle_search_impl(params, session):
     # If we have an ID but no query text, try to look up the title
     # This helps Prowlarr work with indexers that don't support ID-based searches
     if not query and has_identifier:
-        logger.info(f"Attempting title lookup for ID-based search: imdbid={params.get('imdbid')} tmdbid={params.get('tmdbid')} tvdbid={params.get('tvdbid')} rid={params.get('rid')}")
+        logger.info(f"Attempting title lookup for ID-based search: imdbid={params.get('imdbid')} tmdbid={params.get('tmdbid')} tvdbid={params.get('tvdbid')} rid={params.get('rid')}")  # noqa: E501
         title = await lookup_title_from_id(
             session,
             imdbid=params.get('imdbid'),
@@ -815,16 +816,16 @@ async def _handle_search_impl(params, session):
     # `PACHELARR_TEST_FALLBACK_QUERY`, use it for category-only requests so Sonarr's test
     # returns sample results.
     if not query and not search_kwargs.get('categories') and not has_identifier:
-        logger.info('No query nor identifier nor categories present for search; returning empty feed to avoid Prowlarr 400')
+        logger.info('No query nor identifier nor categories present for search; returning empty feed to avoid Prowlarr 400')  # noqa: E501
         return Response(content=create_empty_rss(), media_type="application/xml")
     # If we don't have a query but categories were provided,
     # this is likely a category-only call (Sonarr test). If a fallback is
     # configured, substitute it as the query and log the behavior.
     # Don't apply fallback if we have identifiers (imdbid, tvdbid, etc.)
     if not query and not has_identifier and (params.get('cat') or search_kwargs.get('categories')):
-        logger.info(f"Category-only search detected via raw params; substituting fallback query '{PACHELARR_TEST_FALLBACK_QUERY}' for test behavior")
+        logger.info(f"Category-only search detected via raw params; substituting fallback query '{PACHELARR_TEST_FALLBACK_QUERY}' for test behavior")  # noqa: E501
     # Debugging: log fallback / query state for incoming search verification
-    logger.info(f"Search debug: query={query!r} categories={search_kwargs.get('categories')!r} fallback={PACHELARR_TEST_FALLBACK_QUERY!r}")
+    logger.info(f"Search debug: query={query!r} categories={search_kwargs.get('categories')!r} fallback={PACHELARR_TEST_FALLBACK_QUERY!r}")  # noqa: E501
     logger.debug(f"search_kwargs full: {search_kwargs}")
 
     prowlarr_results_xml = await search_prowlarr(session, search_kwargs)
@@ -880,11 +881,11 @@ async def _handle_search_impl(params, session):
                             unresolved_count += 1
                 for tr in parse_trackers_from_magnet(mag):
                     tracker_map.setdefault(tr, []).append(ih)
-        logger.debug(f"tracker_map built: entries={len(tracker_map)} magnets_resolved={resolved_count} magnets_unresolved={unresolved_count}")
+        logger.debug(f"tracker_map built: entries={len(tracker_map)} magnets_resolved={resolved_count} magnets_unresolved={unresolved_count}")  # noqa: E501
         if tracker_map:
             uncached_seeders = await scrape_trackers_inverted(tracker_map)
         else:
-            logger.debug("tracker_map empty; skipping scrape_trackers_inverted (no tr= in any magnet / no magnets returned by Prowlarr)")
+            logger.debug("tracker_map empty; skipping scrape_trackers_inverted (no tr= in any magnet / no magnets returned by Prowlarr)")  # noqa: E501
     xml_response = consolidate_and_emit_xml(prowlarr_results_xml, cached_status, uncached_seeders)
     return Response(content=xml_response, media_type="application/xml")
 
@@ -934,7 +935,7 @@ async def _search_one_indexer(session, sem, base_url, headers, indexer, params):
                 logger.debug(f"Prowlarr indexer {idx_id} returned {len(xml_bytes)} XML bytes")
                 return xml_bytes
         except asyncio.TimeoutError as e:
-            logger.warning(f"Prowlarr per-indexer Torznab search timed out for indexer {idx_id} after {PROWLARR_INDEXER_SEARCH_TIMEOUT}s: {e}")
+            logger.warning(f"Prowlarr per-indexer Torznab search timed out for indexer {idx_id} after {PROWLARR_INDEXER_SEARCH_TIMEOUT}s: {e}")  # noqa: E501
             return None
         except aiohttp.ClientError as e:
             logger.warning(f"Prowlarr per-indexer Torznab search failed for indexer {idx_id}: {e}")
@@ -1256,7 +1257,7 @@ def consolidate_and_emit_xml(indexer_xml_pairs, cached_status, uncached_seeders=
         # Merge tr= trackers from EVERY item's magnet in the group (union, order-preserved).
         trackers = []
         seen = set()
-        for (item, mag, _proxy) in group:
+        for (_item, mag, _proxy) in group:
             for tr in parse_trackers_from_magnet(mag):
                 if tr not in seen:
                     seen.add(tr)
@@ -1652,7 +1653,7 @@ async def _udp_scrape_tracker(host, port, chunks, timeout):
     for (ip, p) in addrs:
         proto = _ScrapeProto()
         try:
-            transport, _ = await loop.create_datagram_endpoint(lambda: proto, remote_addr=(ip, p))
+            transport, _ = await loop.create_datagram_endpoint(lambda proto=proto: proto, remote_addr=(ip, p))
         except Exception as e:
             logger.debug(f"_udp_scrape_tracker: connect failed to {ip}:{p} ({host}:{port}): {e}", exc_info=True)
             continue
@@ -1702,7 +1703,7 @@ async def _udp_scrape_tracker(host, port, chunks, timeout):
                     data_body = data[8:]
                     rec_count = len(data_body) // 12
                     if rec_count != len(valid_hashes):
-                        logger.warning(f"_udp_scrape_tracker: record count {rec_count} != requested {len(valid_hashes)} for {host}:{port}; mapping positionally anyway")
+                        logger.warning(f"_udp_scrape_tracker: record count {rec_count} != requested {len(valid_hashes)} for {host}:{port}; mapping positionally anyway")  # noqa: E501
                     for i in range(0, len(data_body), 12):
                         rec = data_body[i:i+12]
                         if len(rec) < 12:
@@ -1710,7 +1711,7 @@ async def _udp_scrape_tracker(host, port, chunks, timeout):
                         seeders, leechers, downloads = struct.unpack('!III', rec)
                         idx = i // 12
                         if idx < len(valid_hashes):
-                            aggregate[valid_hashes[idx]] = {'seeders': seeders, 'leechers': leechers, 'downloads': downloads}
+                            aggregate[valid_hashes[idx]] = {'seeders': seeders, 'leechers': leechers, 'downloads': downloads}  # noqa: E501
                 except Exception as e:
                     logger.debug(f"_udp_scrape_tracker: per-chunk error for {host}:{port}: {e}", exc_info=True)
                     break
@@ -1731,7 +1732,7 @@ async def scrape_trackers_inverted(tracker_to_hashes):
     """
     # Only implement UDP scrape for 'udp://' trackers, ignore others for now
     sem = asyncio.Semaphore(TRACKER_SCRAPE_CONCURRENCY)
-    logger.debug(f"scrape_trackers_inverted: trackers={len(tracker_to_hashes)} concurrency={TRACKER_SCRAPE_CONCURRENCY} batch_size={TRACKER_SCRAPE_BATCH_SIZE} timeout={TRACKER_SCRAPE_TIMEOUT}")
+    logger.debug(f"scrape_trackers_inverted: trackers={len(tracker_to_hashes)} concurrency={TRACKER_SCRAPE_CONCURRENCY} batch_size={TRACKER_SCRAPE_BATCH_SIZE} timeout={TRACKER_SCRAPE_TIMEOUT}")  # noqa: E501
     results_per_hash = {}
     # Cache entries to persist; applied AFTER all trackers complete so an in-flight
     # cross-tracker race cannot short-circuit aggregation within a single call.
@@ -1812,7 +1813,7 @@ async def check_torbox_cache(session, hashes):
         if dedupe_removed_count:
             logger.debug(f"Torbox cache check: dedupe_removed={dedupe_removed_count}")
         logger.debug(
-            f"Torbox cache check: POST {TORBOX_CHECK_URL} total.hashes={total_hashes} unique.hashes={len(unique_hashes)} dedupe_removed={dedupe_removed_count} Authorization=Bearer {_mask_key(TORBOX_API_KEY)}"
+            f"Torbox cache check: POST {TORBOX_CHECK_URL} total.hashes={total_hashes} unique.hashes={len(unique_hashes)} dedupe_removed={dedupe_removed_count} Authorization=Bearer {_mask_key(TORBOX_API_KEY)}"  # noqa: E501
         )
 
         # Helper to combine and normalize results to lowercase keys
@@ -1829,10 +1830,10 @@ async def check_torbox_cache(session, hashes):
                 try:
                     async with session.post(TORBOX_CHECK_URL, json={'hashes': chunk}, headers=headers) as response:
                         if response.status == 401:
-                            logger.warning("Torbox returned 401 Unauthorized. Check TORBOX_API_KEY. Aborting cache checks.")
+                            logger.warning("Torbox returned 401 Unauthorized. Check TORBOX_API_KEY. Aborting cache checks.")  # noqa: E501
                             return None
                         if response.status >= 500:
-                            logger.warning(f"Torbox server error (status {response.status}); attempt {attempt}/{TORBOX_MAX_RETRIES}")
+                            logger.warning(f"Torbox server error (status {response.status}); attempt {attempt}/{TORBOX_MAX_RETRIES}")  # noqa: E501
                             # fall through to retry logic
                         else:
                             response.raise_for_status()
@@ -1852,7 +1853,7 @@ async def check_torbox_cache(session, hashes):
         # use unique_hashes for chunking
         for i in range(0, len(unique_hashes), TORBOX_CHUNK_SIZE):
             chunk = unique_hashes[i:i+TORBOX_CHUNK_SIZE]
-            logger.debug(f"Torbox cache chunk: POST {TORBOX_CHECK_URL} chunk.len={len(chunk)} Authorization=Bearer {_mask_key(TORBOX_API_KEY)}")
+            logger.debug(f"Torbox cache chunk: POST {TORBOX_CHECK_URL} chunk.len={len(chunk)} Authorization=Bearer {_mask_key(TORBOX_API_KEY)}")  # noqa: E501
             try:
                 result = await _call_chunk(chunk)
                 if result is None:

@@ -4,11 +4,10 @@ Validates that when Prowlarr's JSON API omits the magnet (returning only a
 downloadUrl proxy), the tracker scraper can still recover the real magnet —
 either from a redirect Location header or from the response body — and cache it.
 """
-import asyncio
 import pytest
 
 import main as m
-from main import resolve_magnet_via_download, _magnet_cache_get, _magnet_cache_put
+from main import _magnet_cache_get, _magnet_cache_put, resolve_magnet_via_download
 
 
 class FakeResp:

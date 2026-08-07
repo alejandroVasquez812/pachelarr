@@ -12,7 +12,6 @@ from fastapi.testclient import TestClient
 
 import main as m
 
-
 _REQUIRED = ("PROWLARR_URL", "PROWLARR_API_KEY", "TORBOX_API_KEY")
 
 

@@ -161,9 +161,9 @@ main.py          # keeps `uvicorn main:app` working: `from pachelarr.app import 
 **Problem:** No flake8/ruff/black/mypy config exists, and there is no CI. The repo has unused dict-based helpers (`_get_magnet_uri_for_item`, `infohash_from_item` kept "for compatibility" but only used by tests now), and inconsistent quoting/style.
 
 **Tasks:**
-- [ ] Add `ruff` config to `pyproject.toml` (lint + format).
-- [ ] Add `make lint` and `make format` targets to the `Makefile`.
-- [ ] Run a first pass and fix/ignore findings.
+- [x] Add `ruff` config to `pyproject.toml` (lint + format).
+- [x] Add `make lint` and `make format` targets to the `Makefile`.
+- [x] Run a first pass and fix/ignore findings.
 - [ ] Optionally add `mypy` for the cache/config modules (highest-value typing surface).
 
 **Effort:** S (setup) / M (cleanup) · **Impact:** Medium (long-term quality)

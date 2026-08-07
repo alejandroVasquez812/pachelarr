@@ -1,7 +1,7 @@
 import asyncio
+import random
 import socket
 import struct
-import random
 
 from main import _udp_scrape_tracker
 
@@ -40,9 +40,9 @@ class MockTrackerProtocol(asyncio.DatagramProtocol):
                     body = b''
                     for i in range(n):
                         s = self.seeders_list[i] if i < len(self.seeders_list) else self.seeders_list[-1]
-                        l = self.leechers_list[i] if i < len(self.leechers_list) else self.leechers_list[-1]
+                        lch = self.leechers_list[i] if i < len(self.leechers_list) else self.leechers_list[-1]
                         # seeders, leechers, completed(downloads)
-                        body += struct.pack('!III', s, l, 0)
+                        body += struct.pack('!III', s, lch, 0)
                     self.transport.sendto(resp_header + body, addr)
                     return
         except Exception:

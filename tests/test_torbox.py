@@ -7,14 +7,13 @@ new XML-native consolidate_and_emit_xml, which takes
 
 Run from the repo root so `import main` resolves.
 """
-import asyncio
 
 import aiohttp
 from lxml import etree as ET
 
 import main as m
 from tests._fakes import FakeCtx
-from tests._torznab_helpers import build_rss, empty_rss, pair
+from tests._torznab_helpers import build_rss, pair
 
 _TORZNAB = "{http://torznab.com/schemas/2015/feed}"
 
@@ -51,7 +50,7 @@ def _guid_magnet(item):
 def _trs(magnet):
     if not magnet or "?" not in magnet:
         return []
-    from urllib.parse import unquote, parse_qs
+    from urllib.parse import parse_qs, unquote
     try:
         return parse_qs(unquote(magnet.split("?", 1)[1])).get("tr", [])
     except Exception:
