@@ -4,8 +4,8 @@ A single-file FastAPI proxy between Radarr/Sonarr and Prowlarr that boosts Torbo
 
 ## Architecture
 
-- **Entrypoint:** `main.py` (single file, ~2000 lines). Runs via `uvicorn main:app`.
-- **Not a package:** There is no `src/` or `app/` package. All logic lives in `main.py`, imported by tests as `import main`.
+- **Entrypoint:** `main.py` is a thin re-export shim (`uvicorn main:app`); all logic lives in the `pachelarr/` package (`app.py` FastAPI app, `state.py` module-level mutable state, `tmdb.py`/`prowlarr.py`/`torznab.py`/`torbox.py`/`scrape.py`).
+- **Package layout:** `pachelarr/` holds the implementation; `main.py` re-exports every name so tests keep using `import main as m` (including `m.GLOBAL = ...` rebinds and `monkeypatch.setattr('main.X', ...)`, which readers observe via deferred `import main` attribute access).
 - **Protocol:** Torznab XML proxy. Receives Torznab queries from Radarr/Sonarr, queries Prowlarr, enriches results, returns XML.
 - **Search is per-indexer/capability-driven:** `search_prowlarr` is a thin wrapper that fetches the cached `IndexerResource[]` list (`get_prowlarr_indexers_cached`), selects indexers eligible for the query (`select_indexers_for_query`: `enable` + `supportsSearch` + lenient category match incl. nested `subCategories`), builds per-indexer params filtered by each indexer's `*SearchParams` capabilities (`build_per_indexer_params`, forwarding only supported IDs as standard Torznab query params — no `{key:val}` tokens), then runs the per-indexer `GET /<indexerId>/api` (Torznab passthrough) calls in parallel (`search_prowlarr_per_indexer`, bounded by `PROWLARR_PARALLEL_INDEXER_CONCURRENCY`) and returns `[(indexer, xml_bytes), ...]`. Downstream pipeline (`extract_hashes_from_xml_pairs` -> `consolidate_and_emit_xml`) parses and re-emits the Torznab XML natively.
 - **External deps:** Prowlarr instance, Torbox API, optional TMDB API for ID-to-title lookups.

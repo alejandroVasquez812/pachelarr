@@ -3,6 +3,7 @@ name = "pachelarr"
 version = "0.1.0"
 description = "A Prowlarr to Torbox proxy with caching"
 authors = ["Pachelarr Contributors"]
+packages = [{ include = "pachelarr" }]
 
 [tool.poetry.dependencies]
 python = "^3.9"

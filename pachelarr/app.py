@@ -1,0 +1,246 @@
+import logging
+import time
+from contextlib import asynccontextmanager
+
+import aiohttp
+from fastapi import FastAPI, Request, Response
+from lxml import etree as ET
+
+from pachelarr import state
+
+logger = logging.getLogger("pachelarr")
+
+
+@asynccontextmanager
+async def lifespan(app):
+    import main
+
+    _required = {
+        "PROWLARR_URL": main.PROWLARR_URL,
+        "PROWLARR_API_KEY": main.PROWLARR_API_KEY,
+        "TORBOX_API_KEY": main.TORBOX_API_KEY,
+    }
+    _missing = [name for name, val in _required.items() if not (val and str(val).strip())]
+    if _missing:
+        msg = f"Missing required environment variables: {', '.join(_missing)}. Set them and restart."
+        logger.error(msg)
+        raise RuntimeError(msg)
+    connector_limit = max(main.PROWLARR_PARALLEL_INDEXER_CONCURRENCY * 2, 16)
+    try:
+        connector = aiohttp.TCPConnector(limit=connector_limit, limit_per_host=0)
+    except (TypeError, ValueError):
+        connector = aiohttp.TCPConnector()
+    app.state.session = aiohttp.ClientSession(connector=connector)
+    try:
+        yield
+    finally:
+        await app.state.session.close()
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/api")
+async def torznab_proxy(request: Request):
+    """Handles Torznab requests from Sonarr/Radarr."""
+    from pachelarr.torznab import get_caps_xml
+
+    params = request.query_params
+    logger.info(f"Incoming request: {dict(params)} from {request.client}")
+
+    if params.get('t') == 'caps':
+        return Response(content=get_caps_xml(), media_type="application/xml")
+
+    if params.get('t') in ['search', 'tvsearch', 'movie']:
+        try:
+            return await handle_search(params, request.app.state.session)
+        except Exception:
+            logger.exception("Unhandled error in search handler")
+            return Response(status_code=500, content="Internal Server Error")
+
+    return Response(status_code=400, content="Invalid request type")
+
+
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
+
+
+@app.get("/statsz")
+async def statsz():
+    listing = state._INDEXERS_CACHE.get('listing')
+    if listing is not None:
+        age_seconds = int(listing.get('expires', 0.0) - time.time())
+    else:
+        age_seconds = None
+    return {
+        "status": "ok",
+        "scrape_cache_size": len(state._SCRAPE_CACHE),
+        "tmdb_title_cache_size": len(state._TMDB_TITLE_CACHE),
+        "magnet_cache_size": len(state._MAGNET_CACHE),
+        "indexers_cache": {
+            "size": len(state._INDEXERS_CACHE),
+            "age_seconds": age_seconds,
+        },
+        "last_search_latency_ms": state.last_search_latency_ms,
+        "last_search_at": state.last_search_at,
+        "torbox_hits": state.torbox_hits,
+        "torbox_misses": state.torbox_misses,
+    }
+
+
+async def handle_search(params, session):
+    """Performs search, checks cache, and returns enriched results."""
+    t0 = time.time()
+    try:
+        return await _handle_search_impl(params, session)
+    finally:
+        state.last_search_at = time.time()
+        state.last_search_latency_ms = (time.time() - t0) * 1000.0
+
+
+async def _handle_search_impl(params, session):
+    """Performs search, checks cache, and returns enriched results."""
+    import main
+    from pachelarr import scrape, tmdb, torbox, torznab
+
+    query = params.get('q', '')
+    cleaned_query = tmdb.strip_foreign_language_tag(query)
+    if cleaned_query != query:
+        logger.info(f"Stripped trailing foreign-language tag: {query!r} -> {cleaned_query!r}")
+        query = cleaned_query
+    has_identifier = any(params.get(k) for k in ('tvdbid', 'imdbid', 'tmdbid', 'season', 'ep'))
+    if not query and not has_identifier and params.get('cat'):
+        logger.info(f"Incoming category-only request detected; applying fallback query '{main.PACHELARR_TEST_FALLBACK_QUERY}'")  # noqa: E501
+    categories = [cat for cat in params.get('cat', '').split(',') if cat]
+
+    search_kwargs = {
+        'query': query,
+        'categories': categories,
+        'type': params.get('t', 'search')
+    }
+    logger.info(f"Initial search_kwargs: {search_kwargs}")
+    for key in ('tvdbid', 'season', 'ep', 'imdbid', 'tmdbid'):
+        raw = params.get(key)
+        if not raw:
+            continue
+        val = raw.strip()
+        if key in ('season', 'ep'):
+            first_token = val.split()[0] if val.split() else ''
+            digits = ''
+            for ch in first_token:
+                if ch.isdigit():
+                    digits += ch
+                else:
+                    break
+            if digits and digits != val:
+                logger.warning(f"Sanitized {key!r}: {raw!r} -> {digits!r} (non-numeric trailing content stripped)")
+                val = digits
+            elif not digits:
+                logger.warning(f"Non-numeric {key}={raw!r} dropped; not forwarding to Prowlarr")
+                continue
+            else:
+                val = digits
+        search_kwargs[key] = val
+
+    if not query and has_identifier:
+        logger.info(f"Attempting title lookup for ID-based search: imdbid={params.get('imdbid')} tmdbid={params.get('tmdbid')} tvdbid={params.get('tvdbid')} rid={params.get('rid')}")  # noqa: E501
+        title = await tmdb.lookup_title_from_id(
+            session,
+            imdbid=params.get('imdbid'),
+            tmdbid=params.get('tmdbid'),
+            tvdbid=params.get('tvdbid'),
+            rid=params.get('rid'),
+            search_type=params.get('t', 'search')
+        )
+        if title:
+            logger.info(f"Looked up title '{title}' from ID parameters")
+            query = title
+            search_kwargs['query'] = title
+        else:
+            logger.info("Title lookup failed or returned no results")
+
+    if query and not has_identifier and params.get('t') in ('movie', 'tvsearch'):
+        logger.info(f"Attempting ID lookup for title-based search: query={query!r} type={params.get('t')}")
+        ids = await main.lookup_identifier_from_query(session, query, search_type=params.get('t'))
+        if ids:
+            logger.info(f"Looked up IDs from title: {ids}")
+            for k in ('tmdbid', 'imdbid', 'tvdbid'):
+                if ids.get(k):
+                    search_kwargs[k] = ids[k]
+        else:
+            logger.info("ID lookup from title returned no results")
+
+    if params.get('offset'):
+        search_kwargs['offset'] = params.get('offset')
+    if params.get('limit'):
+        search_kwargs['limit'] = params.get('limit')
+
+    if not query and not search_kwargs.get('categories') and not has_identifier:
+        logger.info('No query nor identifier nor categories present for search; returning empty feed to avoid Prowlarr 400')  # noqa: E501
+        return Response(content=torznab.create_empty_rss(), media_type="application/xml")
+    if not query and not has_identifier and (params.get('cat') or search_kwargs.get('categories')):
+        logger.info(f"Category-only search detected via raw params; substituting fallback query '{main.PACHELARR_TEST_FALLBACK_QUERY}' for test behavior")  # noqa: E501
+    logger.info(f"Search debug: query={query!r} categories={search_kwargs.get('categories')!r} fallback={main.PACHELARR_TEST_FALLBACK_QUERY!r}")  # noqa: E501
+    logger.debug(f"search_kwargs full: {search_kwargs}")
+
+    prowlarr_results_xml = await main.search_prowlarr(session, search_kwargs)
+    if not prowlarr_results_xml:
+        return Response(content=torznab.create_empty_rss(), media_type="application/xml")
+
+    info_hashes = torznab.extract_hashes_from_xml_pairs(prowlarr_results_xml)
+    if not info_hashes:
+        return Response(content=torznab.consolidate_and_emit_xml(prowlarr_results_xml, {}), media_type="application/xml")  # noqa: E501
+
+    cached_status = await torbox.check_torbox_cache(session, info_hashes)
+
+    uncached_seeders = {}
+    if state.TRACKER_SCRAPE_ENABLED:
+        logger.debug(f"TRACKER_SCRAPE_ENABLED is on; building tracker_map from {len(prowlarr_results_xml)} XML docs")
+        tracker_map = {}
+        resolved_count = 0
+        unresolved_count = 0
+        seen_hashes = set()
+        for _indexer, xml_bytes in prowlarr_results_xml:
+            if not xml_bytes:
+                continue
+            try:
+                doc = ET.fromstring(xml_bytes)
+            except ET.XMLSyntaxError:
+                continue
+            for item in doc.iter('item'):
+                ih = torznab._infohash_from_xml_item(item)
+                if not ih:
+                    continue
+                if ih in seen_hashes:
+                    continue
+                seen_hashes.add(ih)
+                if cached_status.get(ih):
+                    continue
+                mag = torznab._magnet_from_xml_item(item)
+                if (not mag or 'tr=' not in (mag or '')):
+                    try:
+                        cached_mag = scrape._magnet_cache_get(ih)
+                        if cached_mag:
+                            mag = cached_mag
+                    except KeyError:
+                        proxy = torznab._proxy_url_from_xml_item(item)
+                        if proxy:
+                            resolved = await scrape.resolve_magnet_via_download(session, proxy, state.TRACKER_SCRAPE_TIMEOUT)  # noqa: E501
+                            scrape._magnet_cache_put(ih, resolved)
+                            if resolved and 'tr=' in resolved:
+                                mag = resolved
+                                resolved_count += 1
+                            else:
+                                unresolved_count += 1
+                        else:
+                            unresolved_count += 1
+                for tr in torznab.parse_trackers_from_magnet(mag):
+                    tracker_map.setdefault(tr, []).append(ih)
+        logger.debug(f"tracker_map built: entries={len(tracker_map)} magnets_resolved={resolved_count} magnets_unresolved={unresolved_count}")  # noqa: E501
+        if tracker_map:
+            uncached_seeders = await scrape.scrape_trackers_inverted(tracker_map)
+        else:
+            logger.debug("tracker_map empty; skipping scrape_trackers_inverted (no tr= in any magnet / no magnets returned by Prowlarr)")  # noqa: E501
+    xml_response = torznab.consolidate_and_emit_xml(prowlarr_results_xml, cached_status, uncached_seeders)
+    return Response(content=xml_response, media_type="application/xml")

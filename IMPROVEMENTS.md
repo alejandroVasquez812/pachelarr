@@ -118,10 +118,10 @@ main.py          # keeps `uvicorn main:app` working: `from pachelarr.app import 
 ```
 
 **Tasks:**
-- [ ] Create the `pachelarr/` package and move logic module by module.
-- [ ] Keep `main.py` as the uvicorn entrypoint re-exporting `app`.
-- [ ] Update test imports (`import main` → `from pachelarr import ...` where needed; keep `import main` for backward compat if possible).
-- [ ] Update `AGENTS.md` "Not a package" note.
+- [x] Create the `pachelarr/` package and move logic module by module.
+- [x] Keep `main.py` as the uvicorn entrypoint re-exporting `app`.
+- [x] Update test imports (`import main` → `from pachelarr import ...` where needed; keep `import main` for backward compat if possible).
+- [x] Update `AGENTS.md` "Not a package" note.
 
 **Effort:** L · **Impact:** High (maintainability) — invasive, do last
 **Priority:** P3
