@@ -4,6 +4,12 @@ services:
     container_name: pachelarr
     ports:
       - "6800:6800"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,urllib.request,sys; urllib.request.urlopen(f'http://localhost:{os.getenv(\"PACHELARR_PORT\",8080)}/healthz').read(); sys.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     environment:
       # === REQUIRED CONFIGURATION ===
       # Prowlarr connection settings

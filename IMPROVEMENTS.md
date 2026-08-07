@@ -31,9 +31,9 @@ A second issue (noted in `AGENTS.md`): `tests/test_integration_prowlarr.py` has 
 **Problem:** There is exactly one route (`GET /api`) and zero observability. No Docker healthcheck exists in `docker-compose.yml`. Silent degradation (Prowlarr unreachable but returning `[]`, caches exhausted) is invisible.
 
 **Tasks:**
-- [ ] Add `GET /healthz` → `{"status":"ok"}` for compose healthchecks.
-- [ ] Add `GET /statsz` → cache sizes (`_SCRAPE_CACHE`, `_TMDB_TITLE_CACHE`, `_MAGNET_CACHE`, `_INDEXERS_CACHE`), indexer-listing age, last-search latency, Torbox hit/miss counters.
-- [ ] Wire a `healthcheck:` block into `docker-compose.yml`.
+- [x] Add `GET /healthz` → `{"status":"ok"}` for compose healthchecks.
+- [x] Add `GET /statsz` → cache sizes (`_SCRAPE_CACHE`, `_TMDB_TITLE_CACHE`, `_MAGNET_CACHE`, `_INDEXERS_CACHE`), indexer-listing age, last-search latency, Torbox hit/miss counters.
+- [x] Wire a `healthcheck:` block into `docker-compose.yml`.
 
 **Effort:** S · **Impact:** Medium (ops)
 **Priority:** P2

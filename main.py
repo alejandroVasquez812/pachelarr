@@ -86,6 +86,11 @@ async def lifespan(app):
 
 app = FastAPI(lifespan=lifespan)
 
+last_search_latency_ms = None
+last_search_at = None
+torbox_hits = 0
+torbox_misses = 0
+
 
 async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, rid=None, search_type='movie'):
     """Look up movie/TV title from external IDs using TMDB API.
@@ -662,7 +667,47 @@ async def torznab_proxy(request: Request):
     
     return Response(status_code=400, content="Invalid request type")
 
+
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
+
+
+@app.get("/statsz")
+async def statsz():
+    listing = _INDEXERS_CACHE.get('listing')
+    if listing is not None:
+        age_seconds = int(listing.get('expires', 0.0) - time.time())
+    else:
+        age_seconds = None
+    return {
+        "status": "ok",
+        "scrape_cache_size": len(_SCRAPE_CACHE),
+        "tmdb_title_cache_size": len(_TMDB_TITLE_CACHE),
+        "magnet_cache_size": len(_MAGNET_CACHE),
+        "indexers_cache": {
+            "size": len(_INDEXERS_CACHE),
+            "age_seconds": age_seconds,
+        },
+        "last_search_latency_ms": last_search_latency_ms,
+        "last_search_at": last_search_at,
+        "torbox_hits": torbox_hits,
+        "torbox_misses": torbox_misses,
+    }
+
+
 async def handle_search(params, session):
+    """Performs search, checks cache, and returns enriched results."""
+    global last_search_latency_ms, last_search_at
+    t0 = time.time()
+    try:
+        return await _handle_search_impl(params, session)
+    finally:
+        last_search_at = time.time()
+        last_search_latency_ms = (time.time() - t0) * 1000.0
+
+
+async def _handle_search_impl(params, session):
     """Performs search, checks cache, and returns enriched results."""
     query = params.get('q', '')
     # Strip a trailing foreign-language origin tag (e.g. "Boys Over Flowers KR"
@@ -1703,6 +1748,7 @@ async def scrape_trackers_inverted(tracker_to_hashes):
 
 async def check_torbox_cache(session, hashes):
     """Checks Torbox cache for a list of info hashes."""
+    global torbox_hits, torbox_misses
     try:
         headers = {
             "Content-Type": "application/json",
@@ -1812,6 +1858,9 @@ async def check_torbox_cache(session, hashes):
                 # continue to next chunk
                 continue
         logger.info(f"Torbox cache check: total cached hits={total_hits}")
+        hits_n = len(combined)
+        torbox_hits += hits_n
+        torbox_misses += max(len(unique_hashes) - hits_n, 0)
         return combined
     except aiohttp.ClientError as e:
         logger.exception(f"Error checking Torbox cache: {e}")
