@@ -70,7 +70,7 @@ def _fake_session():
             self.indexer_calls = 0
             self.search_calls = 0
 
-        def get(self, url, headers=None, params=None):
+        def get(self, url, headers=None, params=None, timeout=None):
             if url.endswith('/api/v1/indexer'):
                 self.indexer_calls += 1
                 return FakeCtx(200, [dict(_CAPABLE_INDEXER)])

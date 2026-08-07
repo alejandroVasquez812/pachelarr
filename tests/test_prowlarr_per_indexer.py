@@ -148,7 +148,7 @@ class _IndexerSession:
             return bytes(sd)
         return sd
 
-    def get(self, url, headers=None, params=None):
+    def get(self, url, headers=None, params=None, timeout=None):
         if url.endswith('/api/v1/indexer'):
             return FakeCtx(200, data=list(self._indexers))
         self.search_calls.append(params)
@@ -206,7 +206,7 @@ def test_indexers_cache_fallback_on_error(monkeypatch):
             raise aiohttp.ClientError("boom")
 
     class ErrorSession:
-        def get(self, url, headers=None, params=None):
+        def get(self, url, headers=None, params=None, timeout=None):
             return ErrorCtx()
 
     result = asyncio.new_event_loop().run_until_complete(
@@ -235,7 +235,7 @@ def test_indexers_cache_fallback_empty_when_no_cache(monkeypatch):
             raise aiohttp.ClientError("boom")
 
     class ErrorSession:
-        def get(self, url, headers=None, params=None):
+        def get(self, url, headers=None, params=None, timeout=None):
             return ErrorCtx()
 
     result = asyncio.new_event_loop().run_until_complete(
@@ -432,7 +432,7 @@ def test_search_prowlarr_per_indexer_one_failure_does_not_abort_others():
             self.search_calls = []
             self.search_urls = []
 
-        def get(self, url, headers=None, params=None):
+        def get(self, url, headers=None, params=None, timeout=None):
             if url.endswith('/api/v1/indexer'):
                 return FakeCtx(200, data=[])
             self.search_calls.append(params)
@@ -481,7 +481,7 @@ def test_search_prowlarr_per_indexer_respects_concurrency_cap(monkeypatch):
         def __init__(self, state):
             self._state = state
 
-        def get(self, url, headers=None, params=None):
+        def get(self, url, headers=None, params=None, timeout=None):
             if url.endswith('/api/v1/indexer'):
                 return FakeCtx(200, data=[])
             return TrackingCtx(self._state)
@@ -504,3 +504,75 @@ def test_search_prowlarr_per_indexer_skips_none_tasks():
     assert len(session.search_calls) == 1
     # One successful pair.
     assert len(out) == 1
+
+
+def test_search_prowlarr_per_indexer_timeout_does_not_abort_others():
+    """A hung/timed-out indexer (asyncio.TimeoutError) is dropped, not fatal.
+
+    Mirrors test_search_prowlarr_per_indexer_one_failure_does_not_abort_others
+    but the failing indexer raises asyncio.TimeoutError from the
+    ``async with session.get(...)`` block (as real aiohttp does on timeout).
+    The good indexer's XML must still come back; no exception propagates.
+    """
+    idxs = [_capable_indexer(id_=1), _capable_indexer(id_=2)]
+    tasks = [(idx, m.build_per_indexer_params(idx, {'type': 'movie', 'query': 'X'})) for idx in idxs]
+
+    class TimeoutCtx:
+        def __init__(self):
+            self.status = 200
+
+        async def __aenter__(self):
+            raise asyncio.TimeoutError("indexer hung")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def json(self):
+            return []
+
+        async def read(self):
+            return empty_rss()
+
+        def raise_for_status(self):
+            return None
+
+    class OkCtx:
+        def __init__(self):
+            self.status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def json(self):
+            return []
+
+        async def read(self):
+            return _torznab_xml([{"hash": "GOOD1", "title": "T", "seeders": 1}])
+
+        def raise_for_status(self):
+            return None
+
+    class HungSession:
+        def __init__(self):
+            self.search_calls = []
+            self.search_urls = []
+
+        def get(self, url, headers=None, params=None, timeout=None):
+            if url.endswith('/api/v1/indexer'):
+                return FakeCtx(200, data=[])
+            self.search_calls.append(params)
+            self.search_urls.append(url)
+            iid = _params_idx_id(params, url)
+            return TimeoutCtx() if iid == '1' else OkCtx()
+
+    sess = HungSession()
+    out = asyncio.new_event_loop().run_until_complete(m.search_prowlarr_per_indexer(sess, tasks))
+    # Both indexers were attempted.
+    assert len(sess.search_calls) == 2
+    # The timed-out indexer is dropped; only the good one survives.
+    assert len(out) == 1
+    assert out[0][0]['id'] == 2
+    assert b"GOOD1" in out[0][1]

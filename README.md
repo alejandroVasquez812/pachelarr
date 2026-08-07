@@ -366,6 +366,11 @@ All configuration is done via environment variables in `docker-compose.yml`.
 | `PACHELARR_SEEDERS_BOOST` | `10000` | Seeders added to cached torrents |
 | `PACHELARR_TEST_FALLBACK_QUERY` | `""` | Fallback query for category-only searches (improves Sonarr "Test" button) |
 
+#### Prowlarr Settings
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROWLARR_INDEXER_SEARCH_TIMEOUT` | `10.0` | Total timeout in seconds per per-indexer Torznab search GET (a hung indexer is dropped, not aborted) |
+
 #### Torbox Settings
 | Variable | Default | Description |
 |----------|---------|-------------|

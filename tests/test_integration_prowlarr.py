@@ -86,7 +86,7 @@ class _XmlSession:
             return self._search_xml(url, params)
         return self._search_xml
 
-    def get(self, url, headers=None, params=None):
+    def get(self, url, headers=None, params=None, timeout=None):
         if url.endswith('/api/v1/indexer'):
             return _XmlCtx(200, xml=None)  # JSON path unused here; data served below
         self.last_url = url
@@ -123,7 +123,7 @@ class _JsonIndexerXmlSession(_XmlSession):
         def raise_for_status(self):
             return None
 
-    def get(self, url, headers=None, params=None):
+    def get(self, url, headers=None, params=None, timeout=None):
         if url.endswith('/api/v1/indexer'):
             return self._IdxCtx(list(self._indexers))
         return super().get(url, headers, params)

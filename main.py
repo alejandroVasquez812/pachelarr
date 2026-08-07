@@ -57,6 +57,7 @@ TMDB_TITLE_LOOKUP_CACHE_MAX = int(os.getenv("TMDB_TITLE_LOOKUP_CACHE_MAX", "5000
 PROWLARR_INDEXERS_CACHE_TTL = int(os.getenv("PROWLARR_INDEXERS_CACHE_TTL", "300"))
 PROWLARR_INDEXERS_CACHE_MAX = int(os.getenv("PROWLARR_INDEXERS_CACHE_MAX", "1"))
 PROWLARR_PARALLEL_INDEXER_CONCURRENCY = int(os.getenv("PROWLARR_PARALLEL_INDEXER_CONCURRENCY", "8"))
+PROWLARR_INDEXER_SEARCH_TIMEOUT = float(os.getenv("PROWLARR_INDEXER_SEARCH_TIMEOUT", "10.0"))
 
 async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, rid=None, search_type='movie'):
     """Look up movie/TV title from external IDs using TMDB API.
@@ -849,11 +850,19 @@ async def _search_one_indexer(session, sem, base_url, headers, indexer, params):
             f"headers={{'X-Api-Key':'{_mask_prowlarr_key(PROWLARR_API_KEY)}'}}"
         )
         try:
-            async with session.get(url, headers=headers, params=qp) as response:
+            async with session.get(
+                url,
+                headers=headers,
+                params=qp,
+                timeout=aiohttp.ClientTimeout(total=PROWLARR_INDEXER_SEARCH_TIMEOUT),
+            ) as response:
                 response.raise_for_status()
                 xml_bytes = await response.read()
                 logger.debug(f"Prowlarr indexer {idx_id} returned {len(xml_bytes)} XML bytes")
                 return xml_bytes
+        except asyncio.TimeoutError as e:
+            logger.warning(f"Prowlarr per-indexer Torznab search timed out for indexer {idx_id} after {PROWLARR_INDEXER_SEARCH_TIMEOUT}s: {e}")
+            return None
         except aiohttp.ClientError as e:
             logger.warning(f"Prowlarr per-indexer Torznab search failed for indexer {idx_id}: {e}")
             return None

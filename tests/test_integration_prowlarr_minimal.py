@@ -44,7 +44,7 @@ def test_search_prowlarr_does_not_forward_limit_zero(monkeypatch):
             self.last_headers = None
             self.last_url = None
 
-        def get(self, url, headers=None, params=None):
+        def get(self, url, headers=None, params=None, timeout=None):
             if url.endswith('/api/v1/indexer'):
                 return FakeCtx(200, data=[dict(_capable)])
             # /<id>/api Torznab passthrough.

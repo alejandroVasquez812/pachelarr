@@ -133,9 +133,9 @@ main.py          # keeps `uvicorn main:app` working: `from pachelarr.app import 
 **Problem:** `_search_one_indexer` calls `session.get(url, headers=..., params=qp)` with **no `timeout=`** (`main.py:852`), relying on aiohttp's default 5-min total timeout. With `PROWLARR_PARALLEL_INDEXER_CONCURRENCY=8`, a single hung indexer can stall a search for minutes.
 
 **Tasks:**
-- [ ] Add `PROWLARR_INDEXER_SEARCH_TIMEOUT` env var (default e.g. 10s).
-- [ ] Pass `aiohttp.ClientTimeout(total=PROWLARR_INDEXER_SEARCH_TIMEOUT)` to each per-indexer `session.get`.
-- [ ] Confirm `_search_one_indexer` still returns `None` on `asyncio.TimeoutError` (one bad indexer never aborts the gather).
+- [x] Add `PROWLARR_INDEXER_SEARCH_TIMEOUT` env var (default e.g. 10s).
+- [x] Pass `aiohttp.ClientTimeout(total=PROWLARR_INDEXER_SEARCH_TIMEOUT)` to each per-indexer `session.get`.
+- [x] Confirm `_search_one_indexer` still returns `None` on `asyncio.TimeoutError` (one bad indexer never aborts the gather).
 
 **Effort:** XS · **Impact:** High (reliability)
 **Priority:** P1
