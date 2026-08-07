@@ -10,10 +10,10 @@ Run from the repo root so `import main` resolves.
 import asyncio
 
 import aiohttp
-import pytest
 from lxml import etree as ET
 
 import main as m
+from tests._fakes import FakeCtx
 from tests._torznab_helpers import build_rss, empty_rss, pair
 
 _TORZNAB = "{http://torznab.com/schemas/2015/feed}"
@@ -22,28 +22,6 @@ _TORZNAB = "{http://torznab.com/schemas/2015/feed}"
 async def _hs(params):
     async with aiohttp.ClientSession() as session:
         return await m.handle_search(params, session)
-
-
-class FakeCtx:
-    def __init__(self, status, data):
-        self.status = status
-        self._data = data
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-    async def json(self):
-        if callable(self._data):
-            return self._data()
-        return self._data
-
-    def raise_for_status(self):
-        if self.status >= 400:
-            import aiohttp
-            raise aiohttp.ClientError(f"status {self.status}")
 
 
 class FakeSession:
@@ -84,7 +62,6 @@ def _trs(magnet):
 # check_torbox_cache (Torbox JSON API) — unchanged behavior
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
 async def test_check_torbox_cache_single_chunk_success():
     mapping = {"ABC123": True}
     session = FakeSession([(200, mapping)])
@@ -94,7 +71,6 @@ async def test_check_torbox_cache_single_chunk_success():
     assert session.last_headers and 'Authorization' in session.last_headers
 
 
-@pytest.mark.asyncio
 async def test_check_torbox_cache_chunking():
     hashes = [f"HASH{i:03d}" for i in range(350)]
 
@@ -111,14 +87,12 @@ async def test_check_torbox_cache_chunking():
     assert session.last_headers and 'Authorization' in session.last_headers
 
 
-@pytest.mark.asyncio
 async def test_check_torbox_cache_401():
     session = FakeSession([(401, {})])
     out = await m.check_torbox_cache(session, ["ABC123"])
     assert out == {}
 
 
-@pytest.mark.asyncio
 async def test_check_torbox_cache_list_data_response():
     def data_fn():
         return {"data": [{"hash": "ABC123", "name": "file1"}]}
@@ -127,7 +101,6 @@ async def test_check_torbox_cache_list_data_response():
     assert out == {"abc123": {"hash": "ABC123", "name": "file1"}}
 
 
-@pytest.mark.asyncio
 async def test_check_torbox_cache_direct_list_response():
     data = [{"hash": "ABC123", "name": "file1"}]
     session = FakeSession([(200, data)])
@@ -135,7 +108,6 @@ async def test_check_torbox_cache_direct_list_response():
     assert out == {"abc123": {"hash": "ABC123", "name": "file1"}}
 
 
-@pytest.mark.asyncio
 async def test_check_torbox_cache_deduplication_order():
     responses = [(200, {"data": {"abc123": True}})]
     session = FakeSession(responses)
@@ -262,7 +234,6 @@ def test_generate_torznab_enclosure_populated():
     assert mm and mm.group(1) != ''
 
 
-@pytest.mark.asyncio
 async def test_scrape_trackers_inverted_max(monkeypatch):
     """scrape_trackers_inverted aggregates per-metric max across trackers."""
     m._SCRAPE_CACHE.clear()
@@ -306,7 +277,6 @@ def test_consolidate_all_items_union_and_canonical():
     assert _attr_map(it).get("seeders") == "20"
 
 
-@pytest.mark.asyncio
 async def test_full_pipeline_integration(monkeypatch):
     """End-to-end: extract hashes -> torbox cache -> consolidate + emit XML."""
     h1 = "abc123abc123abc123abc123abc123abc123abcd"
@@ -344,7 +314,6 @@ async def test_full_pipeline_integration(monkeypatch):
     assert 'torznab:attr name="seeders" value="7"' in decoded
 
 
-@pytest.mark.asyncio
 async def test_prowlarr_has_duplicates_but_cachebox_dedupes(monkeypatch):
     """Duplicate infohashes across indexers consolidate to one <item> with
     merged trackers."""

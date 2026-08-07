@@ -2,7 +2,6 @@ import asyncio
 import socket
 import struct
 import random
-import pytest
 
 from main import _udp_scrape_tracker
 
@@ -51,7 +50,6 @@ class MockTrackerProtocol(asyncio.DatagramProtocol):
             return
 
 
-@pytest.mark.asyncio
 async def test_udp_scrape_tracker_local_server():
     loop = asyncio.get_event_loop()
     # prepare the server on localhost:0 (random free port)
@@ -78,7 +76,6 @@ async def test_udp_scrape_tracker_local_server():
         transport.close()
 
 
-@pytest.mark.asyncio
 async def test_udp_scrape_tracker_record_count_mismatch(caplog):
     """When the server returns fewer records than requested, _udp_scrape_tracker maps positionally
     and logs a warning about the record-count mismatch."""
@@ -136,7 +133,6 @@ async def test_udp_scrape_tracker_record_count_mismatch(caplog):
         transport.close()
 
 
-@pytest.mark.asyncio
 async def test_scrape_trackers_inverted_cache_hit(monkeypatch):
     """A second identical scrape call should hit the cache and not re-invoke
     the per-tracker helper for already-cached hashes."""
@@ -169,7 +165,6 @@ async def test_scrape_trackers_inverted_cache_hit(monkeypatch):
     m._SCRAPE_CACHE.clear()
 
 
-@pytest.mark.asyncio
 async def test_scrape_trackers_inverted_multi_chunk_single_call(monkeypatch):
     """When hashes exceed TRACKER_SCRAPE_BATCH_SIZE, the per-tracker helper receives
     multiple chunks in a single call (connection reuse)."""
@@ -204,7 +199,6 @@ async def test_scrape_trackers_inverted_multi_chunk_single_call(monkeypatch):
     m._SCRAPE_CACHE.clear()
 
 
-@pytest.mark.asyncio
 async def test_resolve_udp_addr_dedupes(monkeypatch):
     """_resolve_udp_addr dedupes resolved (ip, port) tuples and returns [] on failure."""
     from main import _resolve_udp_addr

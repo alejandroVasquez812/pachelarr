@@ -86,13 +86,13 @@ A second issue (noted in `AGENTS.md`): `tests/test_integration_prowlarr.py` has 
 **Problem:** `pytest-asyncio ^0.20.3` is pinned but there is no `asyncio_mode = "auto"` config, so every async test needs `@pytest.mark.asyncio`. AGENTS.md also flags heavy `FakeSession`/`FakeCtx` duplication in `test_integration_prowlarr.py`, with indentation that is fragile to edit.
 
 **Tasks:**
-- [ ] Add to `pyproject.toml`:
+- [x] Add to `pyproject.toml`:
   ```toml
   [tool.pytest.ini_options]
   asyncio_mode = "auto"
   ```
-- [ ] Extract shared `FakeSession` / `FakeCtx` into `tests/_fakes.py`.
-- [ ] Trim `test_integration_prowlarr.py` to use the shared fakes (also resolves the indentation fragility).
+- [x] Extract shared `FakeSession` / `FakeCtx` into `tests/_fakes.py`.
+- [x] Trim `test_integration_prowlarr.py` to use the shared fakes (also resolves the indentation fragility).
 
 **Effort:** M · **Impact:** Medium (test velocity)
 **Priority:** P2

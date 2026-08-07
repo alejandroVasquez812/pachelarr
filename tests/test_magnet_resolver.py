@@ -57,7 +57,6 @@ def clear_magnet_cache():
     m._MAGNET_CACHE.clear()
 
 
-@pytest.mark.asyncio
 async def test_resolve_magnet_from_redirect_location():
     # Prowlarr download proxy returns 302 with the magnet as Location.
     sess = FakeSession([FakeResp(status=302, location=MAGNET)])
@@ -67,7 +66,6 @@ async def test_resolve_magnet_from_redirect_location():
     assert "tr=" in got
 
 
-@pytest.mark.asyncio
 async def test_resolve_magnet_from_response_body():
     # Some proxies 200 with the magnet inline (text/uri-list or plain).
     sess = FakeSession([FakeResp(status=200, body=f"\n{MAGNET}\n")])
@@ -75,7 +73,6 @@ async def test_resolve_magnet_from_response_body():
     assert got == MAGNET
 
 
-@pytest.mark.asyncio
 async def test_resolve_magnet_from_body_extracts_until_whitespace():
     body = f"garbage {MAGNET} trailing"
     sess = FakeSession([FakeResp(status=200, body=body)])
@@ -84,7 +81,6 @@ async def test_resolve_magnet_from_body_extracts_until_whitespace():
     assert "trailing" not in got
 
 
-@pytest.mark.asyncio
 async def test_resolve_returns_none_when_no_magnet():
     # 200 with arbitrary HTML / non-magnet body.
     sess = FakeSession([FakeResp(status=200, body="<html>not a magnet</html>")])
@@ -92,7 +88,6 @@ async def test_resolve_returns_none_when_no_magnet():
     assert got is None
 
 
-@pytest.mark.asyncio
 async def test_resolve_follows_http_redirect_then_finds_magnet():
     # First hop: 302 to another http URL. Second hop: 302 to the magnet.
     def second(url):
@@ -106,7 +101,6 @@ async def test_resolve_follows_http_redirect_then_finds_magnet():
     assert len(sess.calls) == 2
 
 
-@pytest.mark.asyncio
 async def test_resolve_none_input_returns_none():
     sess = FakeSession([])
     got = await resolve_magnet_via_download(sess, None)

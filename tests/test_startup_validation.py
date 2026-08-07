@@ -22,7 +22,6 @@ def restore_globals():
         setattr(m, name, val)
 
 
-@pytest.mark.asyncio
 async def test_lifespan_ok_when_required_vars_set(restore_globals):
     m.PROWLARR_URL = "http://x"
     m.PROWLARR_API_KEY = "k"
@@ -32,7 +31,6 @@ async def test_lifespan_ok_when_required_vars_set(restore_globals):
     assert m.app.state.session.closed
 
 
-@pytest.mark.asyncio
 async def test_lifespan_raises_when_required_vars_missing(restore_globals):
     m.PROWLARR_URL = None
     m.PROWLARR_API_KEY = ""
@@ -47,7 +45,6 @@ async def test_lifespan_raises_when_required_vars_missing(restore_globals):
     assert not getattr(m.app.state, "session", None) or True
 
 
-@pytest.mark.asyncio
 async def test_lifespan_tmdb_optional(restore_globals):
     m.PROWLARR_URL = "http://x"
     m.PROWLARR_API_KEY = "k"
@@ -58,7 +55,6 @@ async def test_lifespan_tmdb_optional(restore_globals):
     assert m.app.state.session.closed
 
 
-@pytest.mark.asyncio
 async def test_lifespan_lists_all_missing_at_once(restore_globals):
     m.PROWLARR_URL = None
     m.PROWLARR_API_KEY = None
