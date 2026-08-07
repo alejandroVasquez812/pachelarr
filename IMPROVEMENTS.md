@@ -59,8 +59,8 @@ A second issue (noted in `AGENTS.md`): `tests/test_integration_prowlarr.py` has 
 **Problem:** `PROWLARR_URL` / `PROWLARR_API_KEY` / `TORBOX_API_KEY` are required but read as bare `os.getenv(...)` (`main.py:19-22`). If unset, the app boots fine and only fails on the first search with a cryptic 500.
 
 **Tasks:**
-- [ ] Add a startup validator (`@app.on_event("startup")` or `lifespan`) that checks required keys.
-- [ ] Log a clear, actionable error and exit if missing.
+- [x] Add a startup validator (`@app.on_event("startup")` or `lifespan`) that checks required keys.
+- [x] Log a clear, actionable error and exit if missing.
 
 **Effort:** S · **Impact:** High (DX)
 **Priority:** P1

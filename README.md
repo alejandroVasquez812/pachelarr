@@ -348,6 +348,8 @@ All configuration is done via environment variables in `docker-compose.yml`.
 
 ### Required Settings
 
+`PROWLARR_URL`, `PROWLARR_API_KEY`, and `TORBOX_API_KEY` are **required and validated at startup** (fail-fast): if any is missing or empty, the app logs a clear error naming all missing vars and aborts boot instead of failing later on the first search with a cryptic 500. `TMDB_API_KEY` and `PACHELARR_API_KEY` are optional.
+
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `PROWLARR_URL` | Prowlarr instance URL | `http://192.168.1.100:9696` |

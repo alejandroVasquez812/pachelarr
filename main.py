@@ -62,6 +62,16 @@ PROWLARR_INDEXER_SEARCH_TIMEOUT = float(os.getenv("PROWLARR_INDEXER_SEARCH_TIMEO
 
 @asynccontextmanager
 async def lifespan(app):
+    _required = {
+        "PROWLARR_URL": PROWLARR_URL,
+        "PROWLARR_API_KEY": PROWLARR_API_KEY,
+        "TORBOX_API_KEY": TORBOX_API_KEY,
+    }
+    _missing = [name for name, val in _required.items() if not (val and str(val).strip())]
+    if _missing:
+        msg = f"Missing required environment variables: {', '.join(_missing)}. Set them and restart."
+        logger.error(msg)
+        raise RuntimeError(msg)
     connector_limit = max(PROWLARR_PARALLEL_INDEXER_CONCURRENCY * 2, 16)
     try:
         connector = aiohttp.TCPConnector(limit=connector_limit, limit_per_host=0)
