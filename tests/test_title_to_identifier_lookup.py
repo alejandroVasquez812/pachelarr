@@ -53,7 +53,21 @@ class FakeSession:
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError("loop closed")
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
+
+
+_FAKE_XML_PAIRS = [({"id": 1}, b'<rss><channel><item><title>T1</title>'
+                    b'<link>magnet:?xt=urn:btih:aaa111</link><guid>magnet:?xt=urn:btih:aaa111</guid>'
+                    b'<enclosure url="magnet:?xt=urn:btih:aaa111" type="application/x-bittorrent"/>'
+                    b'<torznab:attr name="seeders" value="1"/><torznab:attr name="peers" value="0"/>'
+                    b'<torznab:attr name="infohash" value="aaa111"/></item></channel></rss>')]
 
 
 def _enable_title_lookup(monkeypatch):
@@ -196,7 +210,7 @@ def test_handle_search_invokes_lookup_for_movie_title(monkeypatch):
 
     async def fake_search(session, kwargs):
         captured['search_kwargs'] = dict(kwargs)
-        return [{"infoHash": "AAA111", "title": "T1", "magnetUri": "magnet:?xt=urn:btih:AAA111"}]
+        return _FAKE_XML_PAIRS
 
     monkeypatch.setattr(m, "lookup_identifier_from_query", fake_lookup)
     monkeypatch.setattr(m, "search_prowlarr", fake_search)
@@ -222,7 +236,7 @@ def test_handle_search_skips_lookup_when_identifier_present(monkeypatch):
         raise AssertionError("lookup should not be called when identifier present")
 
     async def fake_search(session, kwargs):
-        return [{"infoHash": "AAA111", "title": "T1", "magnetUri": "magnet:?xt=urn:btih:AAA111"}]
+        return _FAKE_XML_PAIRS
 
     monkeypatch.setattr(m, "lookup_identifier_from_query", fake_lookup)
     monkeypatch.setattr(m, "search_prowlarr", fake_search)
@@ -240,7 +254,7 @@ def test_handle_search_skips_lookup_for_generic_search(monkeypatch):
         raise AssertionError("lookup should not be called for generic search type")
 
     async def fake_search(session, kwargs):
-        return [{"infoHash": "AAA111", "title": "T1", "magnetUri": "magnet:?xt=urn:btih:AAA111"}]
+        return _FAKE_XML_PAIRS
 
     monkeypatch.setattr(m, "lookup_identifier_from_query", fake_lookup)
     monkeypatch.setattr(m, "search_prowlarr", fake_search)
@@ -298,6 +312,9 @@ def test_lookup_strips_trailing_foreign_language_tag(monkeypatch):
     search_url = session.urls[0]
     query_part = search_url.split("query=")[-1].split("&")[0]
     assert "KR" not in query_part, search_url
+
+
+def test_handle_search_skips_lookup_when_no_query(monkeypatch):
     """No query (empty q) does not invoke lookup_identifier_from_query."""
     _enable_title_lookup(monkeypatch)
     from starlette.datastructures import QueryParams
@@ -306,7 +323,7 @@ def test_lookup_strips_trailing_foreign_language_tag(monkeypatch):
         raise AssertionError("lookup should not be called when no query present")
 
     async def fake_search(session, kwargs):
-        return [{"infoHash": "AAA111", "title": "T1", "magnetUri": "magnet:?xt=urn:btih:AAA111"}]
+        return _FAKE_XML_PAIRS
 
     monkeypatch.setattr(m, "lookup_identifier_from_query", fake_lookup)
     monkeypatch.setattr(m, "search_prowlarr", fake_search)

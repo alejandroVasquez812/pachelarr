@@ -356,6 +356,10 @@ def _indexer_is_enabled(idx):
     return bool(idx_id and enabled)
 
 
+def isTorrentIndexer(indexer):
+    if not isinstance(indexer, dict):
+        return False
+    return str(indexer.get('protocol', '')).lower() == 'torrent'
 async def get_prowlarr_indexers_cached(session):
     """Fetch the full list of Prowlarr indexers (IndexerResource[]) with caching.
 
@@ -379,6 +383,7 @@ async def get_prowlarr_indexers_cached(session):
             response.raise_for_status()
             raw = await response.json()
             indexers = _normalize_indexer_list(raw)
+            indexers = [idx for idx in indexers if isTorrentIndexer(idx)]
         _indexers_cache_put(indexers)
         enabled_ids = [idx.get('id') for idx in indexers if _indexer_is_enabled(idx)]
         logger.info(f'Prowlarr: found {len(indexers)} indexers ({len(enabled_ids)} enabled): {enabled_ids}')
@@ -425,33 +430,12 @@ _PROWLARR_ENUM_TO_OUR_NAME = {
     'imdbId': 'imdbid',
     'tmdbId': 'tmdbid',
     'tvdbId': 'tvdbid',
-    'rId': 'rid',
-    'tvMazeId': 'tvmaze',
-    'traktId': 'traktid',
-    'doubanId': 'doubanid',
 }
 
-# Our search_kwargs ID field name -> the {key:value} token key embedded in the
-# Prowlarr query string. Matches the historical token-embedding behavior in
-# search_prowlarr (movie path uses the same key; tvsearch maps tvmaze->tvmazeid,
-# ep->episode).
-_TOKEN_KEY_FOR_MOVIE = {
-    'imdbid': 'imdbid',
-    'tmdbid': 'tmdbid',
-    'traktid': 'traktid',
-    'doubanid': 'doubanid',
-}
-_TOKEN_KEY_FOR_TV = {
-    'imdbid': 'imdbid',
-    'tmdbid': 'tmdbid',
-    'tvdbid': 'tvdbid',
-    'rid': 'rid',
-    'tvmaze': 'tvmazeid',
-    'traktid': 'traktid',
-    'doubanid': 'doubanid',
-    'season': 'season',
-    'ep': 'episode',
-}
+# Standard Torznab ID parameters forwarded as distinct query params when the
+# indexer supports them. Sent as-is (no {key:val} token embedding, no name
+# remapping). ep is the Torznab param for episode.
+_TORZNAB_ID_PARAMS = ('imdbid', 'tvdbid', 'tmdbid', 'season', 'ep')
 
 
 def _collect_indexer_category_ids(categories):
@@ -551,23 +535,18 @@ def _indexer_supported_our_names(indexer, search_type):
 
 
 def build_per_indexer_params(indexer, search_kwargs):
-    """Build Prowlarr GET params for a single indexer, filtered by capabilities.
+    """Build per-indexer Torznab GET params, filtered by indexer capabilities.
 
-    Returns a params dict ready for ``GET /api/v1/search`` (including
-    ``indexerIds=[<indexer id>]``), or None to signal "skip this indexer".
+    Returns a params dict (our-names) for the per-indexer ``/<indexerId>/api``
+    Torznab passthrough call, or None to signal "skip this indexer".
 
-    Behavior:
-      * Determines the relevant ``*SearchParams`` list for search_kwargs['type'].
-      * Embeds only the ID params the indexer actually supports as {key:val}
-        tokens in the query, reusing the historical token-key maps.
-      * For a q-only indexer (no ID params supported) when the only available
-        search material was IDs (no base query and no supported IDs), falls back
-        to the title already placed in search_kwargs['query'] by handle_search's
-        TMDB lookup; if that is empty too, returns None (skip).
+    IDs (imdbid/tvdbid/tmdbid/season/ep) are sent as standard Torznab query
+    params (not {key:val} tokens) only when the indexer's ``*SearchParams``
+    capabilities list them. ``params['query']`` is just the base query title.
 
-    The {key:val} token form is parsed by Prowlarr's QueryToParams() regardless
-    of supportsRawSearch, so it is safe to embed tokens even for raw-query-only
-    indexers.
+    The returned dict uses keys: ``query``, ``type``, ``categories`` (list when
+    present), any of the 5 ID params, plus ``limit``/``offset``. It does NOT
+    include ``indexerIds`` (scoping is via the ``/<indexerId>/api`` URL path).
     """
     if not isinstance(indexer, dict):
         return None
@@ -578,42 +557,35 @@ def build_per_indexer_params(indexer, search_kwargs):
     supported = _indexer_supported_our_names(indexer, search_type)
 
     base_query = (search_kwargs.get('query') or '').strip()
-    tokens = []
-    if search_type == 'movie':
-        for our_k, prowl_k in _TOKEN_KEY_FOR_MOVIE.items():
-            if our_k in supported:
-                v = search_kwargs.get(our_k)
-                if v:
-                    tokens.append(f"{{{prowl_k}:{v}}}")
-    elif search_type == 'tvsearch':
-        for our_k, prowl_k in _TOKEN_KEY_FOR_TV.items():
-            if our_k in supported:
-                v = search_kwargs.get(our_k)
-                if v:
-                    tokens.append(f"{{{prowl_k}:{v}}}")
-    # generic 'search' / music / book: no ID tokens (matches legacy behavior).
 
-    composed_query = (base_query + ' ' + ' '.join(tokens)).strip() if tokens else base_query
+    params = {}
+    if base_query:
+        params['query'] = base_query
+    # Forward supported IDs as standard Torznab query params (no tokens).
+    for id_name in _TORZNAB_ID_PARAMS:
+        if id_name in supported:
+            v = search_kwargs.get(id_name)
+            if v:
+                params[id_name] = str(v)
+    cats = search_kwargs.get('categories')
+    if cats:
+        params['categories'] = list(cats)
+    params['type'] = search_type
 
-    # q-only indexer with only ID material and no usable query -> skip.
-    only_ids = not base_query and tokens
-    if only_ids and not composed_query:
+    # q-only indexer (no supported IDs) with no base query and no categories
+    # -> nothing to search with. When categories are present this is an
+    # RSS-style / category-only search (e.g. Sonarr/Radarr test or indexer
+    # ping), so forward it to the indexer even without a query/IDs.
+    if (
+        not params.get('query')
+        and not any(params.get(id_name) for id_name in _TORZNAB_ID_PARAMS)
+        and not params.get('categories')
+    ):
         logger.debug(
-            f"build_per_indexer_params: skipping indexer {idx_id} (q-only, no query/title available)"
+            f"build_per_indexer_params: skipping indexer {idx_id} (q-only, no query/title, no supported IDs, no categories)"
         )
         return None
 
-    params = {}
-    if composed_query:
-        params['query'] = composed_query
-    cats = search_kwargs.get('categories')
-    if cats:
-        # Pass categories as a repeated query param (list) to Prowlarr to avoid
-        # validation errors, e.g. categories=5030&categories=5040.
-        params['categories'] = list(cats)
-    params['type'] = search_type
-    # Scope this request to a single indexer (comma-joined per Prowlarr API).
-    params['indexerIds'] = str(idx_id)
     # Paging: forward limit/offset when present; drop limit=0 (client test noise).
     if search_kwargs.get('limit'):
         try:
@@ -671,7 +643,7 @@ async def handle_search(params):
         logger.info(f"Stripped trailing foreign-language tag: {query!r} -> {cleaned_query!r}")
         query = cleaned_query
     # Check if there are any valid identifier parameters (these are valid searches without q)
-    has_identifier = any(params.get(k) for k in ('rid', 'tvdbid', 'imdbid', 'tmdbid', 'tvmaze', 'traktid', 'doubanid'))
+    has_identifier = any(params.get(k) for k in ('tvdbid', 'imdbid', 'tmdbid', 'season', 'ep'))
     # If query is missing but categories are present and a fallback is configured,
     # substitute it early so downstream logic picks it up. Don't apply fallback if identifiers are present.
     if not query and not has_identifier and params.get('cat'):
@@ -687,7 +659,7 @@ async def handle_search(params):
         }
         logger.info(f"Initial search_kwargs: {search_kwargs}")
         # Pull in optional identifiers from parameters
-        for key in ('rid', 'tvdbid', 'season', 'ep', 'imdbid', 'tmdbid', 'tvmaze', 'traktid', 'doubanid'):
+        for key in ('tvdbid', 'season', 'ep', 'imdbid', 'tmdbid'):
             raw = params.get(key)
             if not raw:
                 continue
@@ -781,187 +753,154 @@ async def handle_search(params):
         logger.info(f"Search debug: query={query!r} categories={search_kwargs.get('categories')!r} fallback={PACHELARR_TEST_FALLBACK_QUERY!r}")
         logger.debug(f"search_kwargs full: {search_kwargs}")
 
-        prowlarr_results = await search_prowlarr(session, search_kwargs)
-        if not prowlarr_results:
+        prowlarr_results_xml = await search_prowlarr(session, search_kwargs)
+        if not prowlarr_results_xml:
             return Response(content=create_empty_rss(), media_type="application/xml")
-        
-        info_hashes = extract_info_hashes(prowlarr_results)
+
+        info_hashes = extract_hashes_from_xml_pairs(prowlarr_results_xml)
         if not info_hashes:
-             return Response(content=generate_torznab_xml(prowlarr_results, {}), media_type="application/xml")
+            return Response(content=consolidate_and_emit_xml(prowlarr_results_xml, {}), media_type="application/xml")
 
         cached_status = await check_torbox_cache(session, info_hashes)
-        
-        # Consolidate duplicates for all items (cached & uncached) and optionally scrape trackers
-        consolidated_results = consolidate_all_items(prowlarr_results, cached_status)
-        # Log consolidation counts for debug/verification
-        try:
-            total_items = len(prowlarr_results)
-            consolidated_count = len(consolidated_results)
-            dup_removed = total_items - consolidated_count
-            if dup_removed:
-                logger.debug(f"Consolidated results: total_items={total_items} consolidated_count={consolidated_count} dedupe_removed={dup_removed}")
-        except Exception:
-            pass
+
         uncached_seeders = {}
         if TRACKER_SCRAPE_ENABLED:
-            logger.debug(f"TRACKER_SCRAPE_ENABLED is on; building tracker_map from {len(consolidated_results)} consolidated items")
-            # Build tracker->hash list mapping
+            logger.debug(f"TRACKER_SCRAPE_ENABLED is on; building tracker_map from {len(prowlarr_results_xml)} XML docs")
             tracker_map = {}
             resolved_count = 0
             unresolved_count = 0
-            for item in consolidated_results:
-                # only uncached
-                info_hash = item.get('infoHash')
-                ih = info_hash.lower() if info_hash else None
-                mag = None
-                if not info_hash:
-                    mag = _get_magnet_uri_for_item(item)
-                    if not mag:
-                        continue
-                    try:
-                        parsed_magnet = parse_qs(unquote(mag.split('?')[1]))
-                        if 'xt' in parsed_magnet:
-                            info_hash = parsed_magnet['xt'][0].split(':')[-1]
-                            ih = info_hash.lower() if info_hash else None
-                    except Exception:
-                        continue
-                if not info_hash or cached_status.get(info_hash.lower()):
+            seen_hashes = set()
+            for _indexer, xml_bytes in prowlarr_results_xml:
+                if not xml_bytes:
                     continue
-                # parse trackers (reuse magnet parsed above if available)
-                if mag is None:
-                    mag = _get_magnet_uri_for_item(item)
-                # If the item's magnet lacks tr= trackers (or there's no magnet),
-                # try to resolve the real magnet via the Prowlarr downloadUrl proxy.
-                # Prowlarr's JSON API can omit the magnet for some indexers; the
-                # source enclosure (and thus the trackers) only resurface when the
-                # proxy download URL is fetched.
-                if (not mag or 'tr=' not in (mag or '')) and ih:
-                    try:
-                        cached_mag = _magnet_cache_get(ih)
-                        mag = cached_mag if cached_mag else mag
-                    except KeyError:
-                        dl = item.get('downloadUrl') or item.get('download_url')
-                        if dl:
-                            resolved = await resolve_magnet_via_download(session, dl, TRACKER_SCRAPE_TIMEOUT)
-                            _magnet_cache_put(ih, resolved)
-                            if resolved and 'tr=' in resolved:
-                                mag = resolved
-                                resolved_count += 1
+                try:
+                    doc = ET.fromstring(xml_bytes)
+                except Exception:
+                    continue
+                for item in doc.iter('item'):
+                    ih = _infohash_from_xml_item(item)
+                    if not ih:
+                        continue
+                    if ih in seen_hashes:
+                        continue
+                    seen_hashes.add(ih)
+                    if cached_status.get(ih):
+                        continue
+                    mag = _magnet_from_xml_item(item)
+                    if (not mag or 'tr=' not in (mag or '')):
+                        try:
+                            cached_mag = _magnet_cache_get(ih)
+                            if cached_mag:
+                                mag = cached_mag
+                        except KeyError:
+                            proxy = _proxy_url_from_xml_item(item)
+                            if proxy:
+                                resolved = await resolve_magnet_via_download(session, proxy, TRACKER_SCRAPE_TIMEOUT)
+                                _magnet_cache_put(ih, resolved)
+                                if resolved and 'tr=' in resolved:
+                                    mag = resolved
+                                    resolved_count += 1
+                                else:
+                                    unresolved_count += 1
                             else:
                                 unresolved_count += 1
-                        else:
-                            unresolved_count += 1
-                for tr in parse_trackers_from_magnet(mag):
-                    tracker_map.setdefault(tr, []).append(ih)
+                    for tr in parse_trackers_from_magnet(mag):
+                        tracker_map.setdefault(tr, []).append(ih)
             logger.debug(f"tracker_map built: entries={len(tracker_map)} magnets_resolved={resolved_count} magnets_unresolved={unresolved_count}")
             if tracker_map:
                 uncached_seeders = await scrape_trackers_inverted(tracker_map)
             else:
                 logger.debug("tracker_map empty; skipping scrape_trackers_inverted (no tr= in any magnet / no magnets returned by Prowlarr)")
-        xml_response = generate_torznab_xml(consolidated_results, cached_status, uncached_seeders)
+        xml_response = consolidate_and_emit_xml(prowlarr_results_xml, cached_status, uncached_seeders)
         return Response(content=xml_response, media_type="application/xml")
 
-def _normalize_prowlarr_results(data):
-    """Normalize a Prowlarr /api/v1/search JSON body to a list of release dicts.
+async def _search_one_indexer(session, sem, base_url, headers, indexer, params):
+    """Execute one per-indexer Torznab passthrough GET under the concurrency semaphore.
 
-    Handles a bare list or a dict whose payload lives under records/results/
-    items/data/result. Returns [] for unknown structures (logged).
-    """
-    if isinstance(data, list):
-        logger.debug(f"Prowlarr returned {len(data)} items (list)")
-        return data
-    if isinstance(data, dict):
-        for key in ('records', 'results', 'items', 'data'):
-            if key in data and isinstance(data[key], list):
-                logger.debug(f"Prowlarr returned {len(data[key])} items (key={key})")
-                return data[key]
-        if 'result' in data and isinstance(data['result'], list):
-            logger.debug(f"Prowlarr returned {len(data['result'])} items (result)")
-            return data['result']
-    logger.warning(f"Unknown Prowlarr search response structure: {type(data).__name__}")
-    return []
+    Calls ``GET <PROWLARR_URL>/<indexerId>/api`` (path-scoped) and reads the
+    raw Torznab XML response bytes. Returns the XML bytes, or None on any
+    per-indexer error (one failing indexer never aborts the gather).
 
-
-async def _search_one_indexer(session, sem, url, headers, indexer, params):
-    """Execute one per-indexer GET /api/v1/search under the concurrency semaphore.
-
-    Returns a list of release dicts ([] on error for this indexer only). Logs
-    per-indexer result counts. Expects params to already include
-    ``indexerIds=<this indexer's id>``.
+    ``params`` uses our-names (query/type/categories/ID params/limit/offset)
+    and is mapped here to Torznab query params (q/t/cat repeated/IDs/same names).
     """
     idx_id = indexer.get('id') if isinstance(indexer, dict) else None
+    url = urljoin(base_url, f"/{idx_id}/api")
+    # Map our-names params -> Torznab query params.
+    qp = {}
+    if params.get('query'):
+        qp['q'] = params['query']
+    if params.get('type'):
+        qp['t'] = params['type']
+    cats = params.get('categories')
+    if cats:
+        qp['cat'] = list(cats)
+    for id_name in _TORZNAB_ID_PARAMS:
+        if params.get(id_name):
+            qp[id_name] = params[id_name]
+    if params.get('limit'):
+        qp['limit'] = params['limit']
+    if params.get('offset'):
+        qp['offset'] = params['offset']
     async with sem:
         logger.debug(
-            f"Prowlarr per-indexer search: GET {url} indexerIds={idx_id} "
-            f"query={params.get('query')!r} type={params.get('type')!r} "
-            f"cats={params.get('categories')!r} headers={{'X-Api-Key':'{_mask_prowlarr_key(PROWLARR_API_KEY)}'}}"
+            f"Prowlarr per-indexer Torznab: GET {url} indexerId={idx_id} "
+            f"q={params.get('query')!r} t={params.get('type')!r} cats={params.get('categories')!r} "
+            f"headers={{'X-Api-Key':'{_mask_prowlarr_key(PROWLARR_API_KEY)}'}}"
         )
         try:
-            async with session.get(url, headers=headers, params=params) as response:
+            async with session.get(url, headers=headers, params=qp) as response:
                 response.raise_for_status()
-                data = await response.json()
-                results = _normalize_prowlarr_results(data)
-                logger.debug(f"Prowlarr indexer {idx_id} returned {len(results)} items")
-                return results
+                xml_bytes = await response.read()
+                logger.debug(f"Prowlarr indexer {idx_id} returned {len(xml_bytes)} XML bytes")
+                return xml_bytes
         except aiohttp.ClientError as e:
-            logger.warning(f"Prowlarr per-indexer search failed for indexer {idx_id}: {e}")
-            return []
+            logger.warning(f"Prowlarr per-indexer Torznab search failed for indexer {idx_id}: {e}")
+            return None
         except Exception as e:
-            # Non-2xx from raise_for_status raises aiohttp.ClientResponseError (a
-            # ClientError subclass), but guard any other error so one indexer
-            # never aborts the gather.
-            logger.warning(f"Prowlarr per-indexer search error for indexer {idx_id}: {e}")
-            return []
+            logger.warning(f"Prowlarr per-indexer Torznab search error for indexer {idx_id}: {e}")
+            return None
 
 
 async def search_prowlarr_per_indexer(session, tasks):
-    """Run per-indexer Prowlarr searches in parallel and concatenate results.
+    """Run per-indexer Torznab searches in parallel; return (indexer, xml_bytes) pairs.
 
     ``tasks`` is a list of (indexer, params) pairs (params may be None = skip;
     such tasks are dropped before dispatch). Concurrency is bounded by
     PROWLARR_PARALLEL_INDEXER_CONCURRENCY via asyncio.Semaphore. Each per-indexer
-    call swallows its own errors and returns [] so one failing indexer never
-    aborts the others. Results are concatenated in the stable order of ``tasks``
-    (i.e. the order select_indexers_for_query returned).
+    call swallows its own errors and returns None so one failing indexer never
+    aborts the others. Failed/None results are dropped; the returned list keeps
+    only (indexer, xml_bytes) pairs that succeeded, in stable order.
     """
     live = [(idx, p) for idx, p in tasks if p is not None]
     if not live:
         logger.debug("search_prowlarr_per_indexer: no live indexer tasks; returning []")
         return []
-    url = urljoin(PROWLARR_URL, "/api/v1/search")
+    base_url = PROWLARR_URL
     headers = {"X-Api-Key": PROWLARR_API_KEY}
     sem = asyncio.Semaphore(max(PROWLARR_PARALLEL_INDEXER_CONCURRENCY, 1))
-    coros = [_search_one_indexer(session, sem, url, headers, idx, p) for idx, p in live]
+    coros = [_search_one_indexer(session, sem, base_url, headers, idx, p) for idx, p in live]
     batches = await asyncio.gather(*coros, return_exceptions=False)
-    concatenated = []
-    for (idx, _), batch in zip(live, batches):
-        if batch:
-            concatenated.extend(batch)
+    out = [(idx, xml) for (idx, _p), xml in zip(live, batches) if xml is not None]
     logger.info(
-        f"search_prowlarr_per_indexer: {len(live)} indexers -> {len(concatenated)} total items"
+        f"search_prowlarr_per_indexer: {len(live)} indexers -> {len(out)} successful XML docs"
     )
-    return concatenated
+    return out
 
 
 async def search_prowlarr(session, search_kwargs):
-    """Search Prowlarr for the given query (per-indexer, capability-driven).
+    """Search Prowlarr per-indexer (capability-driven) and return Torznab XML pairs.
 
-    This is a thin wrapper that:
+    Thin wrapper that:
       1. fetches the cached indexer list (get_prowlarr_indexers_cached),
       2. selects indexers eligible for this query (select_indexers_for_query),
       3. builds per-indexer params filtered by each indexer's capabilities
          (build_per_indexer_params), and
-      4. runs the per-indexer GETs in parallel
-         (search_prowlarr_per_indexer), concatenating the JSON results.
+      4. runs the per-indexer ``/<indexerId>/api`` Torznab GETs in parallel
+         (search_prowlarr_per_indexer).
 
-    The fallback query (PACHELARR_TEST_FALLBACK_QUERY) is expected to already be
-    placed in search_kwargs['query'] by handle_search before this is called, so
-    q-only indexers still receive a usable query.
-
-    For backward compatibility with tests that call search_prowlarr directly
-    with a FakeSession whose /api/v1/indexer returns [] (empty list), this
-    wrapper returns [] and leaves session.last_params untouched (no GETs issued
-    when there are no selected indexers).
+    Returns ``[(indexer_dict, xml_bytes), ...]`` (only successful indexers).
+    Returns ``[]`` when there are no indexers or no eligible tasks.
     """
     try:
         indexers = await get_prowlarr_indexers_cached(session)
@@ -973,7 +912,7 @@ async def search_prowlarr(session, search_kwargs):
         return []
     search_type = search_kwargs.get('type', 'search')
     categories = search_kwargs.get('categories') or []
-    has_ids = any(search_kwargs.get(k) for k in ('rid', 'tvdbid', 'imdbid', 'tmdbid', 'tvmaze', 'traktid', 'doubanid', 'season', 'ep'))
+    has_ids = any(search_kwargs.get(k) for k in ('tvdbid', 'imdbid', 'tmdbid', 'season', 'ep'))
     selected = select_indexers_for_query(indexers, search_type, categories, has_ids)
     tasks = []
     for idx in selected:
@@ -985,20 +924,89 @@ async def search_prowlarr(session, search_kwargs):
         return []
     return await search_prowlarr_per_indexer(session, tasks)
 
-def extract_info_hashes(prowlarr_results):
-    """Extracts info hashes from Prowlarr search results."""
-    hashes = []
+_TORZNAB_NS = 'http://torznab.com/schemas/2015/feed'
+
+
+def _xml_attr(item, name):
+    """Return the value attribute of the first <torznab:attr name=name> on item, or None."""
+    for el in item.iter(f'{{{_TORZNAB_NS}}}attr'):
+        if el.get('name') == name:
+            return el.get('value')
+    return None
+
+
+def _set_xml_attr(item, name, value):
+    """Set the value attribute of the first <torznab:attr name=name>; create if missing."""
+    for el in item.iter(f'{{{_TORZNAB_NS}}}attr'):
+        if el.get('name') == name:
+            el.set('value', value)
+            return
+    ET.SubElement(item, f'{{{_TORZNAB_NS}}}attr', name=name, value=value)
+
+
+def _magnet_from_xml_item(item):
+    """Return the first magnet:? URI found in <link>/<guid>/<enclosure url> of an XML item."""
+    for tag in ('link', 'guid'):
+        el = item.find(tag)
+        if el is not None and el.text and 'magnet:?' in el.text:
+            return el.text
+    enc = item.find('enclosure')
+    if enc is not None:
+        u = enc.get('url')
+        if u and 'magnet:?' in u:
+            return u
+    return None
+
+
+def _proxy_url_from_xml_item(item):
+    """Return the first http(s):// URL in <link>/<enclosure url> (Prowlarr proxy download URL)."""
+    for tag in ('link',):
+        el = item.find(tag)
+        if el is not None and el.text and el.text.startswith(('http://', 'https://')):
+            return el.text
+    enc = item.find('enclosure')
+    if enc is not None:
+        u = enc.get('url')
+        if u and u.startswith(('http://', 'https://')):
+            return u
+    return None
+
+
+def _infohash_from_xml_item(item):
+    """Return a lowercased infohash from a <torznab:attr name=infohash> else parse xt=urn:btih:."""
+    ih = _xml_attr(item, 'infohash')
+    if ih:
+        return ih.lower()
+    mag = _magnet_from_xml_item(item)
+    if mag:
+        try:
+            parsed_magnet = parse_qs(unquote(mag.split('?')[1]))
+            if 'xt' in parsed_magnet:
+                return parsed_magnet['xt'][0].split(':')[-1].lower()
+        except Exception:
+            return None
+    return None
+
+
+def extract_hashes_from_xml_pairs(indexer_xml_pairs):
+    """Return unique lowercased infohashes in first-seen order across XML pairs.
+
+    Parses each (indexer, xml_bytes) doc's <item> elements and extracts hashes
+    via <torznab:attr name=infohash> or xt=urn:btih: from the magnet. Used by
+    handle_search to feed check_torbox_cache BEFORE consolidation.
+    """
     raw_hashes = []
-    for item in prowlarr_results:
-        # Normalize infohashes to lowercase for consistent mapping
-        if item.get('infoHash'):
-            raw_hashes.append(item['infoHash'])
-        else:
-            ih = infohash_from_item(item)
+    for _indexer, xml_bytes in (indexer_xml_pairs or []):
+        if not xml_bytes:
+            continue
+        try:
+            doc = ET.fromstring(xml_bytes)
+        except Exception:
+            continue
+        for item in doc.iter('item'):
+            ih = _infohash_from_xml_item(item)
             if ih:
                 raw_hashes.append(ih)
-
-    # Preserve ordering but dedupe and normalize when returning
     return dedupe_hashes_preserve_order(raw_hashes)
 
 
@@ -1051,10 +1059,10 @@ def _get_magnet_uri_for_item(item):
 
 
 def infohash_from_item(item):
-    """Return a lowercase infohash for an item, trying 'infoHash' first then magnet parsing.
+    """Return a lowercase infohash for a dict item, trying 'infoHash' then magnet parsing.
 
-    Centralizes logic duplicated across extract_info_hashes, consolidate_uncached_items,
-    consolidate_all_items, and generate_torznab_xml. Returns None if no hash can be found.
+    Dict-based helper kept for compatibility; the XML flow uses
+    _infohash_from_xml_item. Returns None if no hash can be found.
     """
     info = item.get('infoHash') if item else None
     if info:
@@ -1073,124 +1081,108 @@ def infohash_from_item(item):
     return None
 
 
-def consolidate_uncached_items(prowlarr_results, cached_status):
-    """Consolidate duplicate uncached items per infohash, merge trackers.
+def _normalize_pubdate(raw):
+    """Parse a raw pubDate string to an RFC1123-formatted GMT string.
 
-    Returns: consolidated list of items (one per unique infohash) where uncached
-    items have merged 'magnetUri' containing combined trackers and other metadata
-    taken from the first item.
+    Handles Prowlarr's ISO8601 (e.g. 2025-05-10T16:57:09Z) and other ISO variants;
+    falls back to now(UTC) on failure/empty.
     """
-    # Group items by infohash (lowercased)
-    groups = {}
-    for item in prowlarr_results:
-        info = item.get('infoHash')
-        if not info:
-            ih = infohash_from_item(item)
-            if ih:
-                info = ih
-        if info:
+    if raw:
+        try:
+            dt = datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ")
+            dt = dt.replace(tzinfo=timezone.utc)
+        except Exception:
             try:
-                info = info.strip()
+                dt = datetime.fromisoformat(raw)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
             except Exception:
-                pass
-
-        if not info:
-            # keep them in a bucket keyed by None to preserve them
-            key = None
-        else:
-            key = info.lower()
-        groups.setdefault(key, []).append(item)
-
-    consolidated = []
-    for key, items in groups.items():
-        if key and cached_status.get(key):
-            # keep cached items as they are (we don't dedupe cached ones)
-            consolidated.extend(items)
-            continue
-        # For uncached or None (non-hash) group, consolidate
-        first = items[0]
-        if key:
-            # merge trackers from magnetUri across all items
-            trackers = []
-            tracker_seen = set()
-            for it in items:
-                mag = _get_magnet_uri_for_item(it)
-                for t in parse_trackers_from_magnet(mag):
-                    if t not in tracker_seen:
-                        trackers.append(t)
-                        tracker_seen.add(t)
-            # Rebuild magnetUri with the combined trackers
-            magnet_base = None
-            # Try to use canonical magnet from 'magnetUri' or 'guid'
-            base_mag = _get_magnet_uri_for_item(first)
-            if base_mag and 'magnet:?' in base_mag:
-                try:
-                    parsed = parse_qs(unquote(base_mag.split('?', 1)[1]))
-                    if 'xt' in parsed:
-                        magnet_base = f"magnet:?xt={parsed['xt'][0]}"
-                except Exception:
-                    magnet_base = None
-            # Ensure magnetUri is set even if the first item had no existing magnet
-            if not magnet_base:
-                magnet_base = f"magnet:?xt=urn:btih:{key}"
-            tr_parts = '&'.join('tr=' + t for t in trackers)
-            # If the base already contains a query ('?'), append trackers with '&', otherwise use '?'
-            if tr_parts:
-                connector = '&' if '?' in magnet_base else '?'
-                first['magnetUri'] = f"{magnet_base}{connector}{tr_parts}"
-            else:
-                first['magnetUri'] = magnet_base
-            # Ensure GUID always reflects the constructed magnetUri
-            first['guid'] = first.get('magnetUri')
-        consolidated.append(first)
-    return consolidated
+                dt = datetime.now(timezone.utc)
+    else:
+        dt = datetime.now(timezone.utc)
+    return dt.strftime('%a, %d %b %Y %H:%M:%S GMT')
 
 
-def consolidate_all_items(prowlarr_results, cached_status, uncached_seeders=None):
-    """Consolidate all duplicate items (cached or uncached) to one per unique infohash.
+def consolidate_and_emit_xml(indexer_xml_pairs, cached_status, uncached_seeders=None):
+    """Parse per-indexer Torznab XML, consolidate by infohash, and emit one merged RSS.
 
-    - Merge trackers for the hash from all magnet URIs
-    - Choose a canonical item (highest original seeders) for metadata
-    - For cached items apply PACHELARR_SEEDERS_BOOST; for uncached use uncached_seeders mapping
-    - Returns a list of consolidated items
+    ``indexer_xml_pairs`` is ``[(indexer_dict, xml_bytes), ...]``. Parses each
+    doc with lxml, collects all <item> elements, groups by lowercased infohash,
+    merges tr= trackers across the group, picks the canonical item (highest
+    original seeders), mutates the canonical <item> node in place (title/guid/
+    link/enclosure/seeders/peers attrs/pubDate), and appends the actual parsed
+    <item> nodes into a new <rss><channel>. Non-hash items are emitted unchanged.
+    Returns the serialized XML bytes.
+
+    Because the appended items are the original parsed lxml nodes, every
+    <torznab:attr>/child we do NOT mutate (size, category, downloadvolumefactor,
+    grabs, etc.) passes through automatically.
     """
-    from copy import deepcopy
-    groups = {}
-    non_hash_items = []
-    for item in prowlarr_results:
-        info = item.get('infoHash')
-        if not info:
-            ih = infohash_from_item(item)
-            if ih:
-                info = ih
-        if not info:
-            non_hash_items.append(item)
-            continue
-        key = info.lower() if info else None
-        groups.setdefault(key, []).append(item)
+    cached_status = {k.lower(): v for k, v in (cached_status or {}).items()}
+    uncached_seeders = uncached_seeders or {}
 
-    consolidated = []
-    for key, items in groups.items():
-        # choose the item with highest original seeders as canonical
-        def parse_seeders(it):
+    # Collect (item_element, infohash_lower_or_None, magnet, proxy_url) records.
+    records = []
+    non_hash_items = []
+    for _indexer, xml_bytes in (indexer_xml_pairs or []):
+        if not xml_bytes:
+            continue
+        try:
+            doc = ET.fromstring(xml_bytes)
+        except Exception as e:
+            logger.warning(f"consolidate_and_emit_xml: skipping malformed XML doc: {e}")
+            continue
+        for item in doc.iter('item'):
+            ih = _infohash_from_xml_item(item)
+            mag = _magnet_from_xml_item(item)
+            proxy = _proxy_url_from_xml_item(item)
+            if ih:
+                records.append((item, ih, mag, proxy))
+            else:
+                non_hash_items.append(item)
+
+    # Group by lowercased infohash, preserving first-seen order.
+    groups = {}
+    order = []
+    for (item, ih, mag, proxy) in records:
+        if ih not in groups:
+            groups[ih] = []
+            order.append(ih)
+        groups[ih].append((item, mag, proxy))
+
+    rss = ET.Element("rss", version="2.0", nsmap={'torznab': _TORZNAB_NS})
+    channel = ET.SubElement(rss, "channel")
+    ET.SubElement(channel, "title").text = "Torbox Cached Indexer"
+
+    emitted = set()
+    for ih in order:
+        if ih in emitted:
+            continue
+        emitted.add(ih)
+        group = groups[ih]
+        # Canonical = max original seeders.
+        def _orig_seeders(rec):
+            v = _xml_attr(rec[0], 'seeders')
             try:
-                return int(it.get('seeders', 0) or 0)
+                return int(v) if v is not None else 0
             except Exception:
                 return 0
-        items_sorted = sorted(items, key=parse_seeders, reverse=True)
-        canonical = deepcopy(items_sorted[0])
-        # merge trackers from all items
+        canonical_rec = max(group, key=_orig_seeders)
+        canonical_item = canonical_rec[0]
+        had_magnet = canonical_rec[1] is not None
+
+        # Merge tr= trackers from EVERY item's magnet in the group (union, order-preserved).
         trackers = []
         seen = set()
-        for it in items:
-            for tr in parse_trackers_from_magnet(_get_magnet_uri_for_item(it)):
+        for (item, mag, _proxy) in group:
+            for tr in parse_trackers_from_magnet(mag):
                 if tr not in seen:
                     seen.add(tr)
                     trackers.append(tr)
-        # compute base magnet from canonical's 'magnetUri' or 'guid'
-        base_mag = _get_magnet_uri_for_item(canonical)
-        # Ensure base retains xt=urn:btih:<hash> so trackers can be appended properly.
+
+        # Build canonical magnet.
         base = None
+        base_mag = canonical_rec[1]
         if base_mag and 'magnet:?' in base_mag:
             try:
                 parsed = parse_qs(unquote(base_mag.split('?', 1)[1]))
@@ -1199,40 +1191,79 @@ def consolidate_all_items(prowlarr_results, cached_status, uncached_seeders=None
             except Exception:
                 base = None
         if not base:
-            # create a base magnet if none present (ensures canonical magnetUri includes xt)
-            base = f"magnet:?xt=urn:btih:{key}"
+            base = f"magnet:?xt=urn:btih:{ih}"
         tr_parts = '&'.join('tr=' + t for t in trackers)
         if tr_parts:
             connector = '&' if '?' in base else '?'
-            canonical['magnetUri'] = f"{base}{connector}{tr_parts}"
+            canonical_magnet = f"{base}{connector}{tr_parts}"
         else:
-            canonical['magnetUri'] = base
-        # Ensure canonical GUID always reflects the constructed canonical magnet URI
-        canonical['guid'] = canonical.get('magnetUri')
-        # set seeders based on cached_status or uncached_seeders
-        if key in (cached_status or {}):
-            # cached -> apply boost
-            try:
-                s = int(canonical.get('seeders', 0) or 0)
-            except Exception:
-                s = 0
-            canonical['seeders'] = max(s, PACHELARR_SEEDERS_BOOST)
-        else:
-            # uncached -> use uncached_seeders if present
-            if uncached_seeders and key in uncached_seeders:
-                entry = uncached_seeders.get(key) or {}
-                seed = int(entry.get('seeders', 0) or 0)
-                try:
-                    orig = int(canonical.get('seeders', 0) or 0)
-                except Exception:
-                    orig = 0
-                canonical['seeders'] = max(orig, seed)
-        logger.debug(f'Consolidated canonical infohash={key} trackers={len(trackers)} magnet={canonical.get("magnetUri")}')
-        consolidated.append(canonical)
+            canonical_magnet = base
 
-    # include non-hash items unchanged
-    consolidated.extend(non_hash_items)
-    return consolidated
+        # Mutate canonical <item> nodes.
+        guid_el = canonical_item.find('guid')
+        if guid_el is None:
+            guid_el = ET.SubElement(canonical_item, 'guid')
+        guid_el.text = canonical_magnet
+        if had_magnet:
+            link_el = canonical_item.find('link')
+            if link_el is None:
+                link_el = ET.SubElement(canonical_item, 'link')
+            link_el.text = canonical_magnet
+
+        is_cached = ih in cached_status
+        title_el = canonical_item.find('title')
+        if is_cached:
+            if title_el is not None:
+                cur = (title_el.text or '').lstrip()
+                if not cur.startswith('[CACHED] '):
+                    title_el.text = f"[CACHED] {cur}"
+
+        # seeders/peers attrs.
+        orig_seeders = _orig_seeders(canonical_rec)
+        try:
+            v = _xml_attr(canonical_item, 'peers')
+            orig_leechers = int(v) if v is not None else 0
+        except Exception:
+            orig_leechers = 0
+        if is_cached:
+            _set_xml_attr(canonical_item, 'seeders', str(max(orig_seeders, PACHELARR_SEEDERS_BOOST)))
+        else:
+            entry = uncached_seeders.get(ih) or {}
+            try:
+                scrape_seeders = int(entry.get('seeders', 0) or 0)
+            except Exception:
+                scrape_seeders = 0
+            try:
+                scrape_leechers = int(entry.get('leechers', 0) or 0)
+            except Exception:
+                scrape_leechers = 0
+            if scrape_seeders or scrape_leechers:
+                _set_xml_attr(canonical_item, 'seeders', str(max(orig_seeders, scrape_seeders)))
+                _set_xml_attr(canonical_item, 'peers', str(max(orig_leechers, scrape_leechers)))
+
+        # Ensure <enclosure url> populated: prefer canonical magnet, else proxy_url, else guid.
+        enc_el = canonical_item.find('enclosure')
+        enc_url = canonical_magnet or canonical_rec[2] or guid_el.text
+        if enc_el is None:
+            ET.SubElement(canonical_item, 'enclosure', url=enc_url or '', type='application/x-bittorrent')
+        else:
+            if not enc_el.get('url'):
+                enc_el.set('url', enc_url or '')
+
+        # Normalize <pubDate> to RFC1123; create if absent.
+        pub_el = canonical_item.find('pubDate')
+        if pub_el is None:
+            pub_el = ET.SubElement(canonical_item, 'pubDate')
+        pub_el.text = _normalize_pubdate(pub_el.text)
+
+        logger.debug(f'consolidate_and_emit_xml: infohash={ih} cached={is_cached} trackers={len(trackers)}')
+        channel.append(canonical_item)
+
+    # Append non-hash items unchanged.
+    for item in non_hash_items:
+        channel.append(item)
+
+    return ET.tostring(rss, pretty_print=True, xml_declaration=True, encoding='UTF-8')
 
 
 # Module-level scrape result cache: {lowercased_infohash: {'seeders','leechers','expires'}}
@@ -1425,101 +1456,6 @@ def _parse_tracker_host_port(tracker_url):
         return hostname, port
     except Exception:
         return None
-
-
-async def _udp_scrape_one(host, port, hashes, timeout=5.0):
-    """Execute a UDP scrape to the given host:port for the list of hashes.
-
-    Returns mapping {hash_hex: {'seeders':int, 'leechers':int, 'downloads':int}}
-    """
-    import random
-    import struct
-    loop = asyncio.get_event_loop()
-    try:
-        logger.debug(f"_udp_scrape_one: host={host} port={port} hashes={len(hashes)} timeout={timeout}")
-        # Connect: action 0
-        # create socket.
-        reader = None
-        fut = loop.create_future()
-
-        class Proto(asyncio.DatagramProtocol):
-            def __init__(self, fut):
-                self.fut = fut
-                self.transport = None
-            def connection_made(self, transport):
-                self.transport = transport
-            def datagram_received(self, data, addr):
-                if not self.fut.done():
-                    self.fut.set_result(data)
-            def error_received(self, exc):
-                if not self.fut.done():
-                    self.fut.set_exception(exc)
-            def connection_lost(self, exc):
-                pass
-
-        transport, proto = await loop.create_datagram_endpoint(lambda: Proto(fut), remote_addr=(host, port))
-        try:
-            # Send connect
-            trans_id = random.randrange(0, 1 << 31)
-            # struct here must be 16 bytes: 64-bit connection_id (magic), 32-bit action, 32-bit transaction
-            conn_req = struct.pack('!QII', 0x41727101980, 0, trans_id)
-            transport.sendto(conn_req)
-            try:
-                data = await asyncio.wait_for(fut, timeout=timeout)
-            except asyncio.TimeoutError:
-                return {}
-            if len(data) < 16:
-                return {}
-            action, trans, conn_id = struct.unpack('!IIQ', data[:16])
-            if action != 0 or trans != trans_id:
-                return {}
-            # Now send scrape
-            # build request: conn_id (8), action (4=2), transaction (4), followed by hashes
-            # hashes as 20-byte binary values
-            trans_id2 = random.randrange(0, 1 << 31)
-            payload = struct.pack('!QII', conn_id, 2, trans_id2)
-            for h in hashes:
-                try:
-                    payload += bytes.fromhex(h)
-                except Exception:
-                    # invalid hash length
-                    continue
-            # clear future and re-use
-            fut = loop.create_future()
-            proto.fut = fut
-            transport.sendto(payload)
-            try:
-                data = await asyncio.wait_for(fut, timeout=timeout)
-            except asyncio.TimeoutError:
-                return {}
-            # response: action (4), trans(4), then for each hash: 3x4 bytes (seeders, leechers, downloads)
-            if len(data) < 8:
-                return {}
-            action, trans = struct.unpack('!II', data[:8])
-            if action != 2:
-                return {}
-            data_body = data[8:]
-            out = {}
-            rec_count = len(data_body) // 12
-            if rec_count != len(hashes):
-                logger.warning(f"_udp_scrape_one: record count {rec_count} != requested {len(hashes)} for {host}:{port}; mapping positionally anyway")
-            # each record is 12 bytes
-            for i in range(0, len(data_body), 12):
-                rec = data_body[i:i+12]
-                if len(rec) < 12:
-                    break
-                seeders, leechers, downloads = struct.unpack('!III', rec)
-                # map positionally to requested hashes
-                idx = i // 12
-                if idx < len(hashes):
-                    out[hashes[idx]] = {'seeders': seeders, 'leechers': leechers, 'downloads': downloads}
-            logger.debug(f"_udp_scrape_one: host={host} port={port} result.count={len(out)}")
-            return out
-        finally:
-            transport.close()
-    except Exception as e:
-        logger.debug(f"_udp_scrape_one error host={host} port={port}: {e}", exc_info=True)
-        return {}
 
 
 async def _resolve_udp_addr(host, port, loop=None):
@@ -1846,153 +1782,14 @@ async def check_torbox_cache(session, hashes):
         return {}
 
 
-def generate_torznab_xml(prowlarr_results, cached_status, uncached_seeders=None):
-    """Generates Torznab XML response from enriched data."""
-    rss = ET.Element("rss", version="2.0", nsmap={'torznab': "http://torznab.com/schemas/2015/feed"})
-    channel = ET.SubElement(rss, "channel")
-    ET.SubElement(channel, "title").text = "Torbox Cached Indexer"
-
-    # Cache normalized statuses to lowercase keys to match extract_info_hashes
-    cached_status = {k.lower(): v for k, v in (cached_status or {}).items()}
-
-    # Consolidate uncached duplicates into single items with merged trackers
-    # Full consolidation should already be performed in handle_search, but fallback here
-    prowlarr_results = consolidate_all_items(prowlarr_results, cached_status, uncached_seeders)
-    # Map canonical magnetUri per infoHash for diagnostic logging
-    canonical_map = {}
-    for it in prowlarr_results:
-        info = it.get('infoHash')
-        if info:
-            canonical_map[info.lower()] = it.get('magnetUri') or it.get('guid') or ''
-    logger.debug(f"Canonical map size: {len(canonical_map)}")
-    # Track infohashes we've emitted to avoid duplicate items in the final feed
-    emitted = set()
-
-    for item in prowlarr_results:
-        info_hash = item.get('infoHash')
-        if not info_hash:
-            ih = infohash_from_item(item)
-            if ih:
-                info_hash = ih
-
-
-        is_cached = cached_status.get(info_hash.lower() if info_hash else None, False)
-
-        title = item.get('title', 'Unknown')
-        if info_hash:
-            if info_hash.lower() in emitted:
-                # Skip duplicate item for the same infohash (full dedupe)
-                continue
-            emitted.add(info_hash.lower())
-        xml_item = ET.SubElement(channel, "item")
-
-        if is_cached:
-            title = f"[CACHED] {title}"
-        ET.SubElement(xml_item, "title").text = title
-
-        # prefer authoritative magnetUri as GUID so the GUID contains unioned trackers
-        # Prefer canonical magnetUri when available so emitted GUIDs contain
-        # the union of trackers for the infohash.
-        guid_text = item.get('magnetUri') or item.get('guid', '')
-        if info_hash:
-            can = canonical_map.get(info_hash.lower())
-            if can:
-                guid_text = can
-                # Ensure we update the item.guid so any later code sees the
-                # canonical magnet as the truth
-                item['guid'] = can
-        # Debug log the GUID and magnetUri we are about to emit
-        try:
-            parsed_tr = parse_trackers_from_magnet(guid_text)
-            can_mag = canonical_map.get(info_hash.lower()) if info_hash else None
-            logger.debug(f"Emitting item: infohash={info_hash} is_cached={is_cached} guid_len={len(guid_text or '')} trackers_count={len(parsed_tr)} canonical_len={len(can_mag or '')} same_as_canonical={guid_text==can_mag}")
-        except Exception:
-            can_mag = canonical_map.get(info_hash.lower()) if info_hash else None
-            logger.debug(f"Emitting item: infohash={info_hash} is_cached={is_cached} guid_len={len(guid_text or '')} trackers_count=0 canonical_len={len(can_mag or '')} same_as_canonical={guid_text==can_mag}")
-        ET.SubElement(xml_item, "guid").text = guid_text
-        # also ensure item.guid reflects magnetUri we used
-        if item.get('magnetUri') and not item.get('guid'):
-            item['guid'] = item.get('magnetUri')
-        # Ensure <link> is populated with a sensible URL; prefer an http download link,
-        # otherwise fall back to the GUID we will emit (canonical magnet/guid).
-        link_text = item.get('link') or item.get('magnetUrl') or item.get('magnetUri') or guid_text
-        logger.debug(f"Emitting link: infohash={info_hash} link_len={len(link_text or '')} link_sample={link_text[:60] if link_text else None}")
-        ET.SubElement(xml_item, "link").text = link_text
-        ET.SubElement(xml_item, "comments").text = item.get('infoUrl')
-        # pubDate: Sonarr requires a valid publish date for Torznab feeds
-        raw_pub_date = item.get('publishDate') or item.get('pubDate') or item.get('date')
-        if raw_pub_date:
-            try:
-                # Prowlarr typically uses ISO8601 like: 2025-05-10T16:57:09Z
-                # Parse naive Z-terminated UTC timestamps
-                dt = datetime.strptime(raw_pub_date, "%Y-%m-%dT%H:%M:%SZ")
-                dt = dt.replace(tzinfo=timezone.utc)
-            except Exception:
-                try:
-                    # Fall back to fromisoformat for other ISO variants
-                    dt = datetime.fromisoformat(raw_pub_date)
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                except Exception:
-                    dt = datetime.now(timezone.utc)
-        else:
-            dt = datetime.now(timezone.utc)
-        # RFC 1123 format (Sonarr expects a valid pubDate)
-        ET.SubElement(xml_item, "pubDate").text = dt.strftime('%a, %d %b %Y %H:%M:%S GMT')
-        # For enclosure use the same link preference as above. Use magnet or download URL
-        # instead of leaving it empty (Sonarr expects an enclosure URL for many torznab feeds).
-        enclosure_url = item.get('link') or item.get('magnetUrl') or item.get('magnetUri') or guid_text
-        logger.debug(f"Emitting enclosure: infohash={info_hash} enclosure_len={len(enclosure_url or '')} enclosure_sample={enclosure_url[:60] if enclosure_url else None}")
-        ET.SubElement(xml_item, "enclosure", url=enclosure_url, type="application/x-bittorrent")
-
-        _seeders = item.get('seeders', 0)
-        try:
-            seeders = int(_seeders)
-        except Exception:
-            seeders = 0
-        # Compute peers (leechers) attr, accounting for uncached tracker scrape data.
-        entry = uncached_seeders.get(info_hash.lower(), {}) if (uncached_seeders and info_hash) else {}
-        try:
-            leech_from_trackers = int(entry.get('leechers', 0) or 0)
-        except Exception:
-            leech_from_trackers = 0
-        try:
-            item_leechers = int(item.get('leechers', 0) or 0)
-        except Exception:
-            item_leechers = 0
-        peers_attr = max(item_leechers, leech_from_trackers)
-        if is_cached:
-            # Apply configured boost but don't reduce seeders if original is higher
-            seeders = max(seeders, PACHELARR_SEEDERS_BOOST)
-            logger.debug(f"Boosting seeders for cached item {info_hash}: {seeders}")
-        else:
-            # If we have a computed uncached seed count, apply max
-            try:
-                seed_from_trackers = int(entry.get('seeders', 0) or 0)
-            except Exception:
-                seed_from_trackers = 0
-            if seed_from_trackers:
-                seeders = max(seeders, seed_from_trackers)
-                logger.debug(f"Setting seeders for uncached item {info_hash} to {seeders} from trackers")
-        
-        ET.SubElement(xml_item, "{http://torznab.com/schemas/2015/feed}attr", name="seeders", value=str(seeders))
-        ET.SubElement(xml_item, "{http://torznab.com/schemas/2015/feed}attr", name="peers", value=str(peers_attr))
-        if info_hash:
-            ET.SubElement(xml_item, "{http://torznab.com/schemas/2015/feed}attr", name="infohash", value=info_hash)
-        ET.SubElement(xml_item, "{http://torznab.com/schemas/2015/feed}attr", name="size", value=str(item.get('size', 0)))
-
-
-    return ET.tostring(rss, pretty_print=True, xml_declaration=True, encoding='UTF-8')
-
-
 def get_caps_xml():
     """Returns the static capabilities XML for Torznab."""
     return """
 <caps>
   <searching>
     <search available="yes" supportedParams="q"/>
-    <tv-search available="yes" supportedParams="q,season,ep"/>
-    <movie-search available="yes" supportedParams="q,imdbid"/>
+    <tv-search available="yes" supportedParams="q,season,ep,tvdbid,imdbid,tmdbid"/>
+    <movie-search available="yes" supportedParams="q,imdbid,tmdbid"/>
   </searching>
   <categories>
     <category id="2000" name="Movies"/>
@@ -2006,26 +1803,6 @@ def create_empty_rss():
     rss = ET.Element("rss", version="2.0")
     channel = ET.SubElement(rss, "channel")
     ET.SubElement(channel, "title").text = "Torbox Cached Indexer"
-    return ET.tostring(rss, pretty_print=True, xml_declaration=True, encoding='UTF-8')
-
-def create_test_rss():
-    """Creates an RSS feed with a single synthetic 'test' item.
-
-    Used when a category-only Radarr/Sonarr "test" request is handled via the
-    fallback query but Prowlarr returned no results. The synthetic row lets the
-    client's indexer test pass.
-    """
-    rss = ET.Element("rss", version="2.0", nsmap={'torznab': "http://torznab.com/schemas/2015/feed"})
-    channel = ET.SubElement(rss, "channel")
-    ET.SubElement(channel, "title").text = "Torbox Cached Indexer"
-    item = ET.SubElement(channel, "item")
-    ET.SubElement(item, "title").text = "test"
-    ET.SubElement(item, "guid").text = "test"
-    ET.SubElement(item, "link").text = "http://localhost/test"
-    ET.SubElement(item, "pubDate").text = datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
-    ET.SubElement(item, "enclosure", url="http://localhost/test", type="application/x-bittorrent")
-    ET.SubElement(item, "{http://torznab.com/schemas/2015/feed}attr", name="seeders", value="1")
-    ET.SubElement(item, "{http://torznab.com/schemas/2015/feed}attr", name="peers", value="0")
     return ET.tostring(rss, pretty_print=True, xml_declaration=True, encoding='UTF-8')
 
 if __name__ == "__main__":
