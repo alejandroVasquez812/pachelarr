@@ -1,6 +1,7 @@
 import os
 import time
 import socket
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import asyncio
@@ -1348,39 +1349,52 @@ def consolidate_and_emit_xml(indexer_xml_pairs, cached_status, uncached_seeders=
 
 
 # Module-level scrape result cache: {lowercased_infohash: {'seeders','leechers','expires'}}
-_SCRAPE_CACHE = {}
+# OrderedDict so GET/PUT can move_to_end and eviction (popitem(last=False)) is true LRU.
+_SCRAPE_CACHE = OrderedDict()
 
 # Module-level title->ID lookup cache:
 # {(title_lower, year, search_type): {'ids': {...}, 'expires': float}}
-_TMDB_TITLE_CACHE = {}
+# OrderedDict for true LRU eviction (popitem(last=False)).
+_TMDB_TITLE_CACHE = OrderedDict()
 
 # Module-level magnet-resolution cache: {lowercased_infohash: magnet_uri_or_None}
 # Populated when Prowlarr's JSON API omits the magnet and we resolve it via the
 # downloadUrl proxy. None is cached too (negative cache) to avoid refetching.
-_MAGNET_CACHE = {}
+# OrderedDict for true LRU eviction (popitem(last=False)).
+_MAGNET_CACHE = OrderedDict()
 _MAGNET_CACHE_MAX = TRACKER_SCRAPE_CACHE_MAX
 
 
 def _magnet_cache_get(h):
-    """Return cached magnet (or None sentinel) for hash. Raises KeyError if absent."""
+    """Return cached magnet (or None sentinel) for hash. Raises KeyError if absent.
+
+    On a hit the entry is moved to the end (most-recently-used) for true LRU.
+    There is no TTL/expiry on this cache; only LRU + KeyError-on-miss.
+    """
     if not h:
         raise KeyError(h)
-    return _MAGNET_CACHE[h.lower() if isinstance(h, str) else h]
+    key = h.lower() if isinstance(h, str) else h
+    val = _MAGNET_CACHE[key]
+    _MAGNET_CACHE.move_to_end(key)
+    return val
 
 
 def _magnet_cache_put(h, magnet):
-    """Insert magnet (may be None) for hash with LRU-ish bound."""
+    """Insert magnet (may be None) for hash with true LRU bound.
+
+    move_to_end on insert keeps this key most-recently-used; eviction drops the
+    least-recently-used (first) entry via popitem(last=False).
+    """
     if not h:
         return
     key = h.lower() if isinstance(h, str) else h
     _MAGNET_CACHE[key] = magnet
-    if len(_MAGNET_CACHE) > _MAGNET_CACHE_MAX:
+    _MAGNET_CACHE.move_to_end(key)
+    while len(_MAGNET_CACHE) > _MAGNET_CACHE_MAX:
         try:
-            # Drop an arbitrary oldest entry; ordering not strictly LRU but bounded.
-            oldest = next(iter(_MAGNET_CACHE))
-            _MAGNET_CACHE.pop(oldest, None)
+            _MAGNET_CACHE.popitem(last=False)
         except Exception:
-            pass
+            break
 
 
 async def resolve_magnet_via_download(session, download_url, timeout=5.0):
@@ -1430,21 +1444,29 @@ async def resolve_magnet_via_download(session, download_url, timeout=5.0):
 
 
 def _scrape_cache_get(h):
-    """Return cached scrape entry for hash if present and unexpired, else None."""
+    """Return cached scrape entry for hash if present and unexpired, else None.
+
+    On a live hit the entry is moved to the end (most-recently-used) for true
+    LRU. Expired-but-present entries are left in place (returned as None) so a
+    stale entry can still serve as a last-good fallback on a later fetch error.
+    """
     if not h:
         return None
-    entry = _SCRAPE_CACHE.get(h.lower() if isinstance(h, str) else h)
+    key = h.lower() if isinstance(h, str) else h
+    entry = _SCRAPE_CACHE.get(key)
     if entry is None:
         return None
     if entry.get('expires', 0) <= time.time():
         return None
+    _SCRAPE_CACHE.move_to_end(key)
     return entry
 
 
 def _scrape_cache_put(h, entry):
     """Insert/refresh a scrape cache entry for hash with TTL-based expiry.
 
-    Evicts the single oldest entry (by expires) when the bound is exceeded.
+    move_to_end on insert keeps this key most-recently-used; eviction drops the
+    least-recently-used (first) entry via popitem(last=False) for true LRU.
     """
     if not h or not entry:
         return
@@ -1452,16 +1474,20 @@ def _scrape_cache_put(h, entry):
     stored = dict(entry)
     stored['expires'] = time.time() + TRACKER_SCRAPE_CACHE_TTL
     _SCRAPE_CACHE[key] = stored
-    if len(_SCRAPE_CACHE) > TRACKER_SCRAPE_CACHE_MAX:
+    _SCRAPE_CACHE.move_to_end(key)
+    while len(_SCRAPE_CACHE) > TRACKER_SCRAPE_CACHE_MAX:
         try:
-            oldest = min(_SCRAPE_CACHE, key=lambda k: _SCRAPE_CACHE[k].get('expires', 0))
-            _SCRAPE_CACHE.pop(oldest, None)
+            _SCRAPE_CACHE.popitem(last=False)
         except Exception:
-            pass
+            break
 
 
 def _tmdb_title_cache_get(key):
-    """Return cached title->ID ids for key if present and unexpired, else None."""
+    """Return cached title->ID ids for key if present and unexpired, else None.
+
+    On a live hit the entry is moved to the end (most-recently-used) for true
+    LRU. Expired-but-present entries are left in place (returned as None).
+    """
     if not key:
         return None
     entry = _TMDB_TITLE_CACHE.get(key)
@@ -1469,59 +1495,71 @@ def _tmdb_title_cache_get(key):
         return None
     if entry.get('expires', 0) <= time.time():
         return None
+    _TMDB_TITLE_CACHE.move_to_end(key)
     return entry.get('ids')
 
 
 def _tmdb_title_cache_put(key, ids):
     """Insert a title->ID cache entry for key with TTL-based expiry.
 
-    Evicts the single oldest entry (by expires) when the bound is exceeded.
+    move_to_end on insert keeps this key most-recently-used; eviction drops the
+    least-recently-used (first) entry via popitem(last=False) for true LRU.
     """
     if not key or not ids:
         return
     _TMDB_TITLE_CACHE[key] = {'ids': dict(ids), 'expires': time.time() + TMDB_TITLE_LOOKUP_CACHE_TTL}
-    if len(_TMDB_TITLE_CACHE) > TMDB_TITLE_LOOKUP_CACHE_MAX:
+    _TMDB_TITLE_CACHE.move_to_end(key)
+    while len(_TMDB_TITLE_CACHE) > TMDB_TITLE_LOOKUP_CACHE_MAX:
         try:
-            oldest = min(_TMDB_TITLE_CACHE, key=lambda k: _TMDB_TITLE_CACHE[k].get('expires', 0))
-            _TMDB_TITLE_CACHE.pop(oldest, None)
+            _TMDB_TITLE_CACHE.popitem(last=False)
         except Exception:
-            pass
+            break
 
 
 # Module-level Prowlarr indexer-listing cache.
 # Stores the full IndexerResource[] list (so capability-driven per-indexer
 # search can read each indexer's searchParams/categories). Format:
 #   {'indexers': [...], 'expires': float}
-# A single listing object holds the entire indexer list; PROWLARR_INDEXERS_CACHE_MAX
-# bounds how many cached listings we keep (default 1).
-_INDEXERS_CACHE = {}
+# A single listing object holds the entire indexer list under the fixed
+# 'listing' key; PROWLARR_INDEXERS_CACHE_MAX bounds how many cached listings we
+# keep (default 1). OrderedDict so eviction (popitem(last=False)) is true LRU.
+_INDEXERS_CACHE = OrderedDict()
 
 
 def _indexers_cache_get():
-    """Return the cached indexer list if present and unexpired, else None."""
+    """Return the cached indexer list if present and unexpired, else None.
+
+    On a live hit the 'listing' entry is moved to the end (most-recently-used)
+    for true LRU. Expired-but-present entries are left in place (returned as
+    None) so a stale listing can still serve as a last-good fallback on a later
+    fetch error (see get_prowlarr_indexers_cached).
+    """
     entry = _INDEXERS_CACHE.get('listing')
     if entry is None:
         return None
     if entry.get('expires', 0) <= time.time():
         return None
+    _INDEXERS_CACHE.move_to_end('listing')
     return entry.get('indexers')
 
 
 def _indexers_cache_put(indexers):
     """Store the full indexer list under a single 'listing' key with TTL expiry.
 
-    Bounded by PROWLARR_INDEXERS_CACHE_MAX (oldest listing evicted when exceeded).
+    move_to_end('listing') on insert keeps it most-recently-used. Bounded by
+    PROWLARR_INDEXERS_CACHE_MAX (least-recently-used extra keys evicted via
+    popitem(last=False) when the bound is exceeded).
     """
     if indexers is None:
         return
     _INDEXERS_CACHE['listing'] = {'indexers': list(indexers), 'expires': time.time() + PROWLARR_INDEXERS_CACHE_TTL}
+    _INDEXERS_CACHE.move_to_end('listing')
     # Single-listing model by default; evict extra keys if the bound is tightened.
-    if len(_INDEXERS_CACHE) > max(PROWLARR_INDEXERS_CACHE_MAX, 1):
+    while len(_INDEXERS_CACHE) > max(PROWLARR_INDEXERS_CACHE_MAX, 1):
         try:
-            oldest = min(_INDEXERS_CACHE, key=lambda k: _INDEXERS_CACHE[k].get('expires', 0))
-            _INDEXERS_CACHE.pop(oldest, None)
+            _INDEXERS_CACHE.popitem(last=False)
         except Exception:
-            pass
+            break
 
 
 def _parse_tracker_host_port(tracker_url):

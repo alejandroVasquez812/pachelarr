@@ -147,9 +147,9 @@ main.py          # keeps `uvicorn main:app` working: `from pachelarr.app import 
 **Problem:** All four module-level caches (`_SCRAPE_CACHE`, `_TMDB_TITLE_CACHE`, `_MAGNET_CACHE`, `_INDEXERS_CACHE`) evict by `min(expires)` or `next(iter(...))` — not real LRU. In particular `_MAGNET_CACHE_put` evicts a **random** entry (`next(iter(_MAGNET_CACHE))`), since dict insertion order ≠ access order.
 
 **Tasks:**
-- [ ] Switch caches to `collections.OrderedDict` + `move_to_end` on get/put.
-- [ ] Or replace with a small `lru_cache`-style helper.
-- [ ] Add a test that evicts the least-recently-used entry (not a random one).
+- [x] Switch caches to `collections.OrderedDict` + `move_to_end` on get/put.
+- [-] Or replace with a small `lru_cache`-style helper.
+- [x] Add a test that evicts the least-recently-used entry (not a random one).
 
 **Effort:** S · **Impact:** Medium (correctness)
 **Priority:** P2
