@@ -45,9 +45,9 @@ A second issue (noted in `AGENTS.md`): `tests/test_integration_prowlarr.py` has 
 **Problem:** `handle_search` opens a **new** `ClientSession` on every search (`main.py:653`). aiohttp strongly recommends reusing a session (connection pool, DNS cache, keep-alive). For a proxy that fans out to N indexers in parallel per request, this is the single highest-leverage perf change.
 
 **Tasks:**
-- [ ] Create one session at startup (`app.state.session`) and close it on shutdown (use FastAPI `lifespan`).
-- [ ] Thread `TORBOX_CHUNK_SIZE` / retry settings into a shared `TCPConnector`.
-- [ ] Update tests that build their own session (e.g. `FakeSession` fakes) so they keep working.
+- [x] Create one session at startup (`app.state.session`) and close it on shutdown (use FastAPI `lifespan`).
+- [x] Thread `TORBOX_CHUNK_SIZE` / retry settings into a shared `TCPConnector`.
+- [x] Update tests that build their own session (e.g. `FakeSession` fakes) so they keep working.
 
 **Effort:** S · **Impact:** High (perf)
 **Priority:** P1

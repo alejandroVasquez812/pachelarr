@@ -1,6 +1,7 @@
 import os
 import time
 import socket
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import asyncio
 from datetime import datetime, timezone
@@ -10,7 +11,6 @@ import aiohttp
 from lxml import etree as ET
 from urllib.parse import urljoin, parse_qs, unquote
 
-app = FastAPI()
 load_dotenv()
 PACHELARR_LOG_LEVEL = os.getenv("PACHELARR_LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, PACHELARR_LOG_LEVEL, logging.INFO))
@@ -58,6 +58,24 @@ PROWLARR_INDEXERS_CACHE_TTL = int(os.getenv("PROWLARR_INDEXERS_CACHE_TTL", "300"
 PROWLARR_INDEXERS_CACHE_MAX = int(os.getenv("PROWLARR_INDEXERS_CACHE_MAX", "1"))
 PROWLARR_PARALLEL_INDEXER_CONCURRENCY = int(os.getenv("PROWLARR_PARALLEL_INDEXER_CONCURRENCY", "8"))
 PROWLARR_INDEXER_SEARCH_TIMEOUT = float(os.getenv("PROWLARR_INDEXER_SEARCH_TIMEOUT", "10.0"))
+
+
+@asynccontextmanager
+async def lifespan(app):
+    connector_limit = max(PROWLARR_PARALLEL_INDEXER_CONCURRENCY * 2, 16)
+    try:
+        connector = aiohttp.TCPConnector(limit=connector_limit, limit_per_host=0)
+    except Exception:
+        connector = aiohttp.TCPConnector()
+    app.state.session = aiohttp.ClientSession(connector=connector)
+    try:
+        yield
+    finally:
+        await app.state.session.close()
+
+
+app = FastAPI(lifespan=lifespan)
+
 
 async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, rid=None, search_type='movie'):
     """Look up movie/TV title from external IDs using TMDB API.
@@ -627,14 +645,14 @@ async def torznab_proxy(request: Request):
 
     if params.get('t') in ['search', 'tvsearch', 'movie']:
         try:
-            return await handle_search(params)
+            return await handle_search(params, request.app.state.session)
         except Exception:
             logger.exception("Unhandled error in search handler")
             return Response(status_code=500, content="Internal Server Error")
     
     return Response(status_code=400, content="Invalid request type")
 
-async def handle_search(params):
+async def handle_search(params, session):
     """Performs search, checks cache, and returns enriched results."""
     query = params.get('q', '')
     # Strip a trailing foreign-language origin tag (e.g. "Boys Over Flowers KR"
@@ -651,169 +669,168 @@ async def handle_search(params):
         logger.info(f"Incoming category-only request detected; applying fallback query '{PACHELARR_TEST_FALLBACK_QUERY}'")
     categories = [cat for cat in params.get('cat', '').split(',') if cat]
 
-    async with aiohttp.ClientSession() as session:
-        # Build search parameters for Prowlarr; include tvdbid, season, ep, rid, imdbid when present
-        search_kwargs = {
-            'query': query,
-            'categories': categories,
-            'type': params.get('t', 'search')
-        }
-        logger.info(f"Initial search_kwargs: {search_kwargs}")
-        # Pull in optional identifiers from parameters
-        for key in ('tvdbid', 'season', 'ep', 'imdbid', 'tmdbid'):
-            raw = params.get(key)
-            if not raw:
-                continue
-            val = raw.strip()
-            # Torznab season/ep are integers. A misconfigured upstream proxy or
-            # client may inject trailing junk such as " HTTP/1.1" (the request
-            # line version) into the query value, e.g. ep="1 HTTP/1.1". Strip
-            # everything after the first whitespace token and keep only the
-            # leading integer so it does not flow into the Prowlarr query token.
-            if key in ('season', 'ep'):
-                first_token = val.split()[0] if val.split() else ''
-                # Keep only leading digits; drop any non-numeric prefix/suffix.
-                digits = ''
-                for ch in first_token:
-                    if ch.isdigit():
-                        digits += ch
-                    else:
-                        break
-                if digits and digits != val:
-                    logger.warning(f"Sanitized {key!r}: {raw!r} -> {digits!r} (non-numeric trailing content stripped)")
-                    val = digits
-                elif not digits:
-                    logger.warning(f"Non-numeric {key}={raw!r} dropped; not forwarding to Prowlarr")
-                    continue
+    # Build search parameters for Prowlarr; include tvdbid, season, ep, rid, imdbid when present
+    search_kwargs = {
+        'query': query,
+        'categories': categories,
+        'type': params.get('t', 'search')
+    }
+    logger.info(f"Initial search_kwargs: {search_kwargs}")
+    # Pull in optional identifiers from parameters
+    for key in ('tvdbid', 'season', 'ep', 'imdbid', 'tmdbid'):
+        raw = params.get(key)
+        if not raw:
+            continue
+        val = raw.strip()
+        # Torznab season/ep are integers. A misconfigured upstream proxy or
+        # client may inject trailing junk such as " HTTP/1.1" (the request
+        # line version) into the query value, e.g. ep="1 HTTP/1.1". Strip
+        # everything after the first whitespace token and keep only the
+        # leading integer so it does not flow into the Prowlarr query token.
+        if key in ('season', 'ep'):
+            first_token = val.split()[0] if val.split() else ''
+            # Keep only leading digits; drop any non-numeric prefix/suffix.
+            digits = ''
+            for ch in first_token:
+                if ch.isdigit():
+                    digits += ch
                 else:
-                    val = digits
-            search_kwargs[key] = val
-        
-        # If we have an ID but no query text, try to look up the title
-        # This helps Prowlarr work with indexers that don't support ID-based searches
-        if not query and has_identifier:
-            logger.info(f"Attempting title lookup for ID-based search: imdbid={params.get('imdbid')} tmdbid={params.get('tmdbid')} tvdbid={params.get('tvdbid')} rid={params.get('rid')}")
-            title = await lookup_title_from_id(
-                session,
-                imdbid=params.get('imdbid'),
-                tmdbid=params.get('tmdbid'),
-                tvdbid=params.get('tvdbid'),
-                rid=params.get('rid'),
-                search_type=params.get('t', 'search')
-            )
-            if title:
-                logger.info(f"Looked up title '{title}' from ID parameters")
-                query = title
-                search_kwargs['query'] = title
+                    break
+            if digits and digits != val:
+                logger.warning(f"Sanitized {key!r}: {raw!r} -> {digits!r} (non-numeric trailing content stripped)")
+                val = digits
+            elif not digits:
+                logger.warning(f"Non-numeric {key}={raw!r} dropped; not forwarding to Prowlarr")
+                continue
             else:
-                logger.info("Title lookup failed or returned no results")
-        
-        # If we have a query but no ID, try to look up IDs from the title.
-        # This lets the Prowlarr ID-token path enrich title-only searches for
-        # ID-capable indexers. Only for movie/tvsearch (generic 'search' emits
-        # no tokens, so the lookup would be wasted). Don't run when IDs were
-        # already supplied (has_identifier guard avoids a double lookup).
-        if query and not has_identifier and params.get('t') in ('movie', 'tvsearch'):
-            logger.info(f"Attempting ID lookup for title-based search: query={query!r} type={params.get('t')}")
-            ids = await lookup_identifier_from_query(session, query, search_type=params.get('t'))
-            if ids:
-                logger.info(f"Looked up IDs from title: {ids}")
-                for k in ('tmdbid', 'imdbid', 'tvdbid'):
-                    if ids.get(k):
-                        search_kwargs[k] = ids[k]
-            else:
-                logger.info("ID lookup from title returned no results")
-        
-        # Include offset/limit to forward client paging requests to Prowlarr
-        if params.get('offset'):
-            search_kwargs['offset'] = params.get('offset')
-        if params.get('limit'):
-            search_kwargs['limit'] = params.get('limit')
-        # NOTE: per-indexer scoping is now driven by /api/v1/indexer capabilities
-        # inside search_prowlarr; client-supplied indexerIds/indexerId are no
-        # longer passed through (this app presents itself as a single indexer to
-        # Radarr/Sonarr).
+                val = digits
+        search_kwargs[key] = val
 
-        # If we don't have a query nor identifier, avoid calling Prowlarr which can return 400
-        # However, Sonarr often performs a 'test' search only with categories (no query string).
-        # Allow category-only searches to be forwarded to Prowlarr so tools like
-        # Sonarr can test the indexer and receive results (or an explicit empty result set from
-        # Prowlarr). Additionally, if an optional fallback query is configured via
-        # `PACHELARR_TEST_FALLBACK_QUERY`, use it for category-only requests so Sonarr's test
-        # returns sample results.
-        if not query and not search_kwargs.get('categories') and not has_identifier:
-            logger.info('No query nor identifier nor categories present for search; returning empty feed to avoid Prowlarr 400')
-            return Response(content=create_empty_rss(), media_type="application/xml")
-        # If we don't have a query but categories were provided,
-        # this is likely a category-only call (Sonarr test). If a fallback is
-        # configured, substitute it as the query and log the behavior.
-        # Don't apply fallback if we have identifiers (imdbid, tvdbid, etc.)
-        if not query and not has_identifier and (params.get('cat') or search_kwargs.get('categories')):
-            logger.info(f"Category-only search detected via raw params; substituting fallback query '{PACHELARR_TEST_FALLBACK_QUERY}' for test behavior")
-        # Debugging: log fallback / query state for incoming search verification
-        logger.info(f"Search debug: query={query!r} categories={search_kwargs.get('categories')!r} fallback={PACHELARR_TEST_FALLBACK_QUERY!r}")
-        logger.debug(f"search_kwargs full: {search_kwargs}")
+    # If we have an ID but no query text, try to look up the title
+    # This helps Prowlarr work with indexers that don't support ID-based searches
+    if not query and has_identifier:
+        logger.info(f"Attempting title lookup for ID-based search: imdbid={params.get('imdbid')} tmdbid={params.get('tmdbid')} tvdbid={params.get('tvdbid')} rid={params.get('rid')}")
+        title = await lookup_title_from_id(
+            session,
+            imdbid=params.get('imdbid'),
+            tmdbid=params.get('tmdbid'),
+            tvdbid=params.get('tvdbid'),
+            rid=params.get('rid'),
+            search_type=params.get('t', 'search')
+        )
+        if title:
+            logger.info(f"Looked up title '{title}' from ID parameters")
+            query = title
+            search_kwargs['query'] = title
+        else:
+            logger.info("Title lookup failed or returned no results")
 
-        prowlarr_results_xml = await search_prowlarr(session, search_kwargs)
-        if not prowlarr_results_xml:
-            return Response(content=create_empty_rss(), media_type="application/xml")
+    # If we have a query but no ID, try to look up IDs from the title.
+    # This lets the Prowlarr ID-token path enrich title-only searches for
+    # ID-capable indexers. Only for movie/tvsearch (generic 'search' emits
+    # no tokens, so the lookup would be wasted). Don't run when IDs were
+    # already supplied (has_identifier guard avoids a double lookup).
+    if query and not has_identifier and params.get('t') in ('movie', 'tvsearch'):
+        logger.info(f"Attempting ID lookup for title-based search: query={query!r} type={params.get('t')}")
+        ids = await lookup_identifier_from_query(session, query, search_type=params.get('t'))
+        if ids:
+            logger.info(f"Looked up IDs from title: {ids}")
+            for k in ('tmdbid', 'imdbid', 'tvdbid'):
+                if ids.get(k):
+                    search_kwargs[k] = ids[k]
+        else:
+            logger.info("ID lookup from title returned no results")
 
-        info_hashes = extract_hashes_from_xml_pairs(prowlarr_results_xml)
-        if not info_hashes:
-            return Response(content=consolidate_and_emit_xml(prowlarr_results_xml, {}), media_type="application/xml")
+    # Include offset/limit to forward client paging requests to Prowlarr
+    if params.get('offset'):
+        search_kwargs['offset'] = params.get('offset')
+    if params.get('limit'):
+        search_kwargs['limit'] = params.get('limit')
+    # NOTE: per-indexer scoping is now driven by /api/v1/indexer capabilities
+    # inside search_prowlarr; client-supplied indexerIds/indexerId are no
+    # longer passed through (this app presents itself as a single indexer to
+    # Radarr/Sonarr).
 
-        cached_status = await check_torbox_cache(session, info_hashes)
+    # If we don't have a query nor identifier, avoid calling Prowlarr which can return 400
+    # However, Sonarr often performs a 'test' search only with categories (no query string).
+    # Allow category-only searches to be forwarded to Prowlarr so tools like
+    # Sonarr can test the indexer and receive results (or an explicit empty result set from
+    # Prowlarr). Additionally, if an optional fallback query is configured via
+    # `PACHELARR_TEST_FALLBACK_QUERY`, use it for category-only requests so Sonarr's test
+    # returns sample results.
+    if not query and not search_kwargs.get('categories') and not has_identifier:
+        logger.info('No query nor identifier nor categories present for search; returning empty feed to avoid Prowlarr 400')
+        return Response(content=create_empty_rss(), media_type="application/xml")
+    # If we don't have a query but categories were provided,
+    # this is likely a category-only call (Sonarr test). If a fallback is
+    # configured, substitute it as the query and log the behavior.
+    # Don't apply fallback if we have identifiers (imdbid, tvdbid, etc.)
+    if not query and not has_identifier and (params.get('cat') or search_kwargs.get('categories')):
+        logger.info(f"Category-only search detected via raw params; substituting fallback query '{PACHELARR_TEST_FALLBACK_QUERY}' for test behavior")
+    # Debugging: log fallback / query state for incoming search verification
+    logger.info(f"Search debug: query={query!r} categories={search_kwargs.get('categories')!r} fallback={PACHELARR_TEST_FALLBACK_QUERY!r}")
+    logger.debug(f"search_kwargs full: {search_kwargs}")
 
-        uncached_seeders = {}
-        if TRACKER_SCRAPE_ENABLED:
-            logger.debug(f"TRACKER_SCRAPE_ENABLED is on; building tracker_map from {len(prowlarr_results_xml)} XML docs")
-            tracker_map = {}
-            resolved_count = 0
-            unresolved_count = 0
-            seen_hashes = set()
-            for _indexer, xml_bytes in prowlarr_results_xml:
-                if not xml_bytes:
+    prowlarr_results_xml = await search_prowlarr(session, search_kwargs)
+    if not prowlarr_results_xml:
+        return Response(content=create_empty_rss(), media_type="application/xml")
+
+    info_hashes = extract_hashes_from_xml_pairs(prowlarr_results_xml)
+    if not info_hashes:
+        return Response(content=consolidate_and_emit_xml(prowlarr_results_xml, {}), media_type="application/xml")
+
+    cached_status = await check_torbox_cache(session, info_hashes)
+
+    uncached_seeders = {}
+    if TRACKER_SCRAPE_ENABLED:
+        logger.debug(f"TRACKER_SCRAPE_ENABLED is on; building tracker_map from {len(prowlarr_results_xml)} XML docs")
+        tracker_map = {}
+        resolved_count = 0
+        unresolved_count = 0
+        seen_hashes = set()
+        for _indexer, xml_bytes in prowlarr_results_xml:
+            if not xml_bytes:
+                continue
+            try:
+                doc = ET.fromstring(xml_bytes)
+            except Exception:
+                continue
+            for item in doc.iter('item'):
+                ih = _infohash_from_xml_item(item)
+                if not ih:
                     continue
-                try:
-                    doc = ET.fromstring(xml_bytes)
-                except Exception:
+                if ih in seen_hashes:
                     continue
-                for item in doc.iter('item'):
-                    ih = _infohash_from_xml_item(item)
-                    if not ih:
-                        continue
-                    if ih in seen_hashes:
-                        continue
-                    seen_hashes.add(ih)
-                    if cached_status.get(ih):
-                        continue
-                    mag = _magnet_from_xml_item(item)
-                    if (not mag or 'tr=' not in (mag or '')):
-                        try:
-                            cached_mag = _magnet_cache_get(ih)
-                            if cached_mag:
-                                mag = cached_mag
-                        except KeyError:
-                            proxy = _proxy_url_from_xml_item(item)
-                            if proxy:
-                                resolved = await resolve_magnet_via_download(session, proxy, TRACKER_SCRAPE_TIMEOUT)
-                                _magnet_cache_put(ih, resolved)
-                                if resolved and 'tr=' in resolved:
-                                    mag = resolved
-                                    resolved_count += 1
-                                else:
-                                    unresolved_count += 1
+                seen_hashes.add(ih)
+                if cached_status.get(ih):
+                    continue
+                mag = _magnet_from_xml_item(item)
+                if (not mag or 'tr=' not in (mag or '')):
+                    try:
+                        cached_mag = _magnet_cache_get(ih)
+                        if cached_mag:
+                            mag = cached_mag
+                    except KeyError:
+                        proxy = _proxy_url_from_xml_item(item)
+                        if proxy:
+                            resolved = await resolve_magnet_via_download(session, proxy, TRACKER_SCRAPE_TIMEOUT)
+                            _magnet_cache_put(ih, resolved)
+                            if resolved and 'tr=' in resolved:
+                                mag = resolved
+                                resolved_count += 1
                             else:
                                 unresolved_count += 1
-                    for tr in parse_trackers_from_magnet(mag):
-                        tracker_map.setdefault(tr, []).append(ih)
-            logger.debug(f"tracker_map built: entries={len(tracker_map)} magnets_resolved={resolved_count} magnets_unresolved={unresolved_count}")
-            if tracker_map:
-                uncached_seeders = await scrape_trackers_inverted(tracker_map)
-            else:
-                logger.debug("tracker_map empty; skipping scrape_trackers_inverted (no tr= in any magnet / no magnets returned by Prowlarr)")
-        xml_response = consolidate_and_emit_xml(prowlarr_results_xml, cached_status, uncached_seeders)
-        return Response(content=xml_response, media_type="application/xml")
+                        else:
+                            unresolved_count += 1
+                for tr in parse_trackers_from_magnet(mag):
+                    tracker_map.setdefault(tr, []).append(ih)
+        logger.debug(f"tracker_map built: entries={len(tracker_map)} magnets_resolved={resolved_count} magnets_unresolved={unresolved_count}")
+        if tracker_map:
+            uncached_seeders = await scrape_trackers_inverted(tracker_map)
+        else:
+            logger.debug("tracker_map empty; skipping scrape_trackers_inverted (no tr= in any magnet / no magnets returned by Prowlarr)")
+    xml_response = consolidate_and_emit_xml(prowlarr_results_xml, cached_status, uncached_seeders)
+    return Response(content=xml_response, media_type="application/xml")
 
 async def _search_one_indexer(session, sem, base_url, headers, indexer, params):
     """Execute one per-indexer Torznab passthrough GET under the concurrency semaphore.

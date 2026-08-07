@@ -11,12 +11,18 @@ import json
 import re
 from urllib.parse import unquote, parse_qs
 
+import aiohttp
 from lxml import etree as ET
 
 import main as m
 from tests._torznab_helpers import build_rss, empty_rss
 
 _TORZNAB = "{http://torznab.com/schemas/2015/feed}"
+
+
+async def _hs(params):
+    async with aiohttp.ClientSession() as session:
+        return await m.handle_search(params, session)
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +219,7 @@ def test_handle_search_forwards_limit_offset(monkeypatch):
 
     monkeypatch.setattr("main.search_prowlarr", fake_search)
     params = QueryParams({"cat": "5030,5040", "t": "tvsearch", "limit": "100", "offset": "0"})
-    resp = _run(m.handle_search(params))
+    resp = _run(_hs(params))
     assert resp.body is not None
     # handle_search consolidates + emits XML; the empty pair yields an empty RSS
     # (no <item>), which is acceptable as long as the body is valid XML.
@@ -240,7 +246,7 @@ def test_handle_search_category_only_fallback_returns_nonempty_xml(monkeypatch):
 
         monkeypatch.setattr("main.search_prowlarr", fake_search)
         params = QueryParams({"cat": "5030,5040", "t": "tvsearch"})
-        resp = _run(m.handle_search(params))
+        resp = _run(_hs(params))
         assert resp.body is not None
         root = ET.fromstring(resp.body)
         assert len(root.findall(".//item")) >= 1

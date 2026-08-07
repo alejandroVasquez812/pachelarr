@@ -14,9 +14,16 @@ Run from the repo root so `import main` resolves.
 """
 import asyncio
 
+import aiohttp
+
 import main as m
 
 _EMPTY_RSS = b"<?xml version='1.0' encoding='UTF-8'?>\n<rss version=\"2.0\"><channel><title>x</title></channel></rss>"
+
+
+async def _hs(params):
+    async with aiohttp.ClientSession() as session:
+        return await m.handle_search(params, session)
 
 
 # One fully-capable indexer so build_per_indexer_params keeps every ID param.
@@ -233,7 +240,7 @@ def test_handle_search_strips_http_version_from_ep_season(monkeypatch):
         'ep': '1 HTTP/1.1',
         'tvdbid': '12345',
     })
-    _run(m.handle_search(params))
+    _run(_hs(params))
 
     assert captured.get('season') == '1', captured
     assert captured.get('ep') == '1', captured
@@ -257,7 +264,7 @@ def test_handle_search_drops_non_numeric_ep(monkeypatch):
         'q': 'Some Show',
         'ep': 'HTTP/1.1',
     })
-    _run(m.handle_search(params))
+    _run(_hs(params))
 
     assert 'ep' not in captured, captured
 

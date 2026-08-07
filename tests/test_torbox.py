@@ -9,6 +9,7 @@ Run from the repo root so `import main` resolves.
 """
 import asyncio
 
+import aiohttp
 import pytest
 from lxml import etree as ET
 
@@ -16,6 +17,11 @@ import main as m
 from tests._torznab_helpers import build_rss, empty_rss, pair
 
 _TORZNAB = "{http://torznab.com/schemas/2015/feed}"
+
+
+async def _hs(params):
+    async with aiohttp.ClientSession() as session:
+        return await m.handle_search(params, session)
 
 
 class FakeCtx:
@@ -357,7 +363,7 @@ async def test_prowlarr_has_duplicates_but_cachebox_dedupes(monkeypatch):
     monkeypatch.setattr('main.search_prowlarr', fake_search)
     from starlette.datastructures import QueryParams
     params = QueryParams({'q': 'Rick and Morty S01E02', 't': 'tvsearch'})
-    resp = await m.handle_search(params)
+    resp = await _hs(params)
     decoded = resp.body.decode()
     item_count = decoded.count('<item>')
     assert item_count == 2  # dup_hash (merged) + other_hash

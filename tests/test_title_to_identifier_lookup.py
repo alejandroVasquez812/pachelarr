@@ -9,7 +9,14 @@ WITHOUT the 'tt' prefix to match the codebase convention.
 """
 import asyncio
 
+import aiohttp
+
 import main as m
+
+
+async def _hs(params):
+    async with aiohttp.ClientSession() as session:
+        return await m.handle_search(params, session)
 
 
 class FakeCtx:
@@ -215,7 +222,7 @@ def test_handle_search_invokes_lookup_for_movie_title(monkeypatch):
     monkeypatch.setattr(m, "lookup_identifier_from_query", fake_lookup)
     monkeypatch.setattr(m, "search_prowlarr", fake_search)
     params = QueryParams({"t": "movie", "q": "Inception 2010"})
-    resp = _run(m.handle_search(params))
+    resp = _run(_hs(params))
     assert resp.body is not None
     assert captured.get('lookup_called') is True
     assert captured.get('lookup_query') == "Inception 2010"
@@ -241,7 +248,7 @@ def test_handle_search_skips_lookup_when_identifier_present(monkeypatch):
     monkeypatch.setattr(m, "lookup_identifier_from_query", fake_lookup)
     monkeypatch.setattr(m, "search_prowlarr", fake_search)
     params = QueryParams({"t": "movie", "q": "Some Title", "imdbid": "12345"})
-    resp = _run(m.handle_search(params))
+    resp = _run(_hs(params))
     assert resp.body is not None
 
 
@@ -259,7 +266,7 @@ def test_handle_search_skips_lookup_for_generic_search(monkeypatch):
     monkeypatch.setattr(m, "lookup_identifier_from_query", fake_lookup)
     monkeypatch.setattr(m, "search_prowlarr", fake_search)
     params = QueryParams({"t": "search", "q": "Some Title"})
-    resp = _run(m.handle_search(params))
+    resp = _run(_hs(params))
     assert resp.body is not None
 
 
@@ -330,6 +337,6 @@ def test_handle_search_skips_lookup_when_no_query(monkeypatch):
     # category-only search (no q), with fallback disabled so it returns empty
     monkeypatch.setattr(m, "PACHELARR_TEST_FALLBACK_QUERY", "")
     params = QueryParams({"t": "movie", "cat": "5030"})
-    resp = _run(m.handle_search(params))
+    resp = _run(_hs(params))
     # empty feed is returned (no query, no identifier, categories present forwarded)
     assert resp.body is not None
