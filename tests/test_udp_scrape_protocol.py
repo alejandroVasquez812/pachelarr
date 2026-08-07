@@ -4,7 +4,7 @@ import struct
 import random
 import pytest
 
-from main import _udp_scrape_one
+from main import _udp_scrape_tracker
 
 
 class MockTrackerProtocol(asyncio.DatagramProtocol):
@@ -52,7 +52,7 @@ class MockTrackerProtocol(asyncio.DatagramProtocol):
 
 
 @pytest.mark.asyncio
-async def test_udp_scrape_one_local_server():
+async def test_udp_scrape_tracker_local_server():
     loop = asyncio.get_event_loop()
     # prepare the server on localhost:0 (random free port)
     protocol = MockTrackerProtocol(seeders_list=[5, 10], leechers_list=[2, 4])
@@ -63,7 +63,7 @@ async def test_udp_scrape_one_local_server():
         # choose two valid 20-byte hex hashes
         hash_a = 'a' * 40  # 20 bytes of 0xaa
         hash_b = 'b' * 40  # 20 bytes of 0xbb
-        res = await _udp_scrape_one('127.0.0.1', port, [hash_a, hash_b], timeout=2.0)
+        res = await _udp_scrape_tracker('127.0.0.1', port, [[hash_a, hash_b]], timeout=2.0)
         # New return shape: {hash: {'seeders':int, 'leechers':int, 'downloads':int}}
         key_a = hash_a.lower()
         key_b = hash_b.lower()
@@ -79,8 +79,8 @@ async def test_udp_scrape_one_local_server():
 
 
 @pytest.mark.asyncio
-async def test_udp_scrape_one_record_count_mismatch(caplog):
-    """When the server returns fewer records than requested, _udp_scrape_one maps positionally
+async def test_udp_scrape_tracker_record_count_mismatch(caplog):
+    """When the server returns fewer records than requested, _udp_scrape_tracker maps positionally
     and logs a warning about the record-count mismatch."""
     import logging
 
@@ -126,7 +126,7 @@ async def test_udp_scrape_one_record_count_mismatch(caplog):
         hash_a = 'a' * 40
         hash_b = 'b' * 40
         with caplog.at_level(logging.WARNING, logger='pachelarr'):
-            res = await _udp_scrape_one('127.0.0.1', port, [hash_a, hash_b], timeout=2.0)
+            res = await _udp_scrape_tracker('127.0.0.1', port, [[hash_a, hash_b]], timeout=2.0)
         # Only the first hash receives a positional record.
         assert hash_a.lower() in res
         assert hash_b.lower() not in res
