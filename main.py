@@ -76,7 +76,7 @@ async def lifespan(app):
     connector_limit = max(PROWLARR_PARALLEL_INDEXER_CONCURRENCY * 2, 16)
     try:
         connector = aiohttp.TCPConnector(limit=connector_limit, limit_per_host=0)
-    except Exception:
+    except (TypeError, ValueError):
         connector = aiohttp.TCPConnector()
     app.state.session = aiohttp.ClientSession(connector=connector)
     try:
@@ -213,7 +213,7 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
         logger.debug(f"Could not lookup title for imdbid={imdbid} tmdbid={tmdbid} tvdbid={tvdbid} rid={rid}")
         return None
     except Exception as e:
-        logger.warning(f"Error looking up title from ID: {e}")
+        logger.warning(f"Error looking up title from ID: {e}", exc_info=True)
         return None
 
 async def lookup_identifier_from_query(session, query, search_type='movie'):
@@ -308,7 +308,7 @@ async def lookup_identifier_from_query(session, query, search_type='movie'):
         logger.debug(f"Could not lookup IDs from title: query={query!r} search_type={search_type}")
         return None
     except Exception as e:
-        logger.warning(f"Error looking up IDs from title: {e}")
+        logger.warning(f"Error looking up IDs from title: {e}", exc_info=True)
         return None
 
 # Common foreign-language origin tags that clients/users append to titles to
@@ -849,7 +849,7 @@ async def _handle_search_impl(params, session):
                 continue
             try:
                 doc = ET.fromstring(xml_bytes)
-            except Exception:
+            except ET.XMLSyntaxError:
                 continue
             for item in doc.iter('item'):
                 ih = _infohash_from_xml_item(item)
@@ -940,7 +940,7 @@ async def _search_one_indexer(session, sem, base_url, headers, indexer, params):
             logger.warning(f"Prowlarr per-indexer Torznab search failed for indexer {idx_id}: {e}")
             return None
         except Exception as e:
-            logger.warning(f"Prowlarr per-indexer Torznab search error for indexer {idx_id}: {e}")
+            logger.warning(f"Prowlarr per-indexer Torznab search error for indexer {idx_id}: {e}", exc_info=True)
             return None
 
 
@@ -1065,7 +1065,7 @@ def _infohash_from_xml_item(item):
             parsed_magnet = parse_qs(unquote(mag.split('?')[1]))
             if 'xt' in parsed_magnet:
                 return parsed_magnet['xt'][0].split(':')[-1].lower()
-        except Exception:
+        except (IndexError, ValueError, KeyError):
             return None
     return None
 
@@ -1083,7 +1083,7 @@ def extract_hashes_from_xml_pairs(indexer_xml_pairs):
             continue
         try:
             doc = ET.fromstring(xml_bytes)
-        except Exception:
+        except ET.XMLSyntaxError:
             continue
         for item in doc.iter('item'):
             ih = _infohash_from_xml_item(item)
@@ -1098,7 +1098,7 @@ def parse_trackers_from_magnet(magnet_uri):
         return []
     try:
         query = magnet_uri.split('?')[1]
-    except Exception:
+    except IndexError:
         return []
     # split by & and look for tr= entries
     trackers = []
@@ -1150,7 +1150,7 @@ def infohash_from_item(item):
     if info:
         try:
             return info.lower()
-        except Exception:
+        except AttributeError:
             return info
     mag = _get_magnet_uri_for_item(item)
     if mag:
@@ -1158,7 +1158,7 @@ def infohash_from_item(item):
             parsed_magnet = parse_qs(unquote(mag.split('?')[1]))
             if 'xt' in parsed_magnet:
                 return parsed_magnet['xt'][0].split(':')[-1].lower()
-        except Exception:
+        except (IndexError, ValueError, KeyError):
             return None
     return None
 
@@ -1173,12 +1173,12 @@ def _normalize_pubdate(raw):
         try:
             dt = datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ")
             dt = dt.replace(tzinfo=timezone.utc)
-        except Exception:
+        except (ValueError, TypeError):
             try:
                 dt = datetime.fromisoformat(raw)
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
-            except Exception:
+            except (ValueError, TypeError):
                 dt = datetime.now(timezone.utc)
     else:
         dt = datetime.now(timezone.utc)
@@ -1211,7 +1211,7 @@ def consolidate_and_emit_xml(indexer_xml_pairs, cached_status, uncached_seeders=
             continue
         try:
             doc = ET.fromstring(xml_bytes)
-        except Exception as e:
+        except ET.XMLSyntaxError as e:
             logger.warning(f"consolidate_and_emit_xml: skipping malformed XML doc: {e}")
             continue
         for item in doc.iter('item'):
@@ -1247,7 +1247,7 @@ def consolidate_and_emit_xml(indexer_xml_pairs, cached_status, uncached_seeders=
             v = _xml_attr(rec[0], 'seeders')
             try:
                 return int(v) if v is not None else 0
-            except Exception:
+            except (TypeError, ValueError):
                 return 0
         canonical_rec = max(group, key=_orig_seeders)
         canonical_item = canonical_rec[0]
@@ -1270,7 +1270,7 @@ def consolidate_and_emit_xml(indexer_xml_pairs, cached_status, uncached_seeders=
                 parsed = parse_qs(unquote(base_mag.split('?', 1)[1]))
                 if 'xt' in parsed:
                     base = f"magnet:?xt={parsed['xt'][0]}"
-            except Exception:
+            except (IndexError, ValueError, KeyError):
                 base = None
         if not base:
             base = f"magnet:?xt=urn:btih:{ih}"
@@ -1305,7 +1305,7 @@ def consolidate_and_emit_xml(indexer_xml_pairs, cached_status, uncached_seeders=
         try:
             v = _xml_attr(canonical_item, 'peers')
             orig_leechers = int(v) if v is not None else 0
-        except Exception:
+        except (TypeError, ValueError):
             orig_leechers = 0
         if is_cached:
             _set_xml_attr(canonical_item, 'seeders', str(max(orig_seeders, PACHELARR_SEEDERS_BOOST)))
@@ -1313,11 +1313,11 @@ def consolidate_and_emit_xml(indexer_xml_pairs, cached_status, uncached_seeders=
             entry = uncached_seeders.get(ih) or {}
             try:
                 scrape_seeders = int(entry.get('seeders', 0) or 0)
-            except Exception:
+            except (TypeError, ValueError):
                 scrape_seeders = 0
             try:
                 scrape_leechers = int(entry.get('leechers', 0) or 0)
-            except Exception:
+            except (TypeError, ValueError):
                 scrape_leechers = 0
             if scrape_seeders or scrape_leechers:
                 _set_xml_attr(canonical_item, 'seeders', str(max(orig_seeders, scrape_seeders)))
@@ -1393,7 +1393,7 @@ def _magnet_cache_put(h, magnet):
     while len(_MAGNET_CACHE) > _MAGNET_CACHE_MAX:
         try:
             _MAGNET_CACHE.popitem(last=False)
-        except Exception:
+        except KeyError:
             break
 
 
@@ -1439,7 +1439,7 @@ async def resolve_magnet_via_download(session, download_url, timeout=5.0):
             if resp.status in (301, 302, 303, 307, 308) and loc and loc.startswith('http'):
                 return await resolve_magnet_via_download(session, loc, timeout)
     except Exception as e:
-        logger.debug(f"resolve_magnet_via_download error for {download_url[:80]}: {e}")
+        logger.debug(f"resolve_magnet_via_download error for {download_url[:80]}: {e}", exc_info=True)
     return None
 
 
@@ -1478,7 +1478,7 @@ def _scrape_cache_put(h, entry):
     while len(_SCRAPE_CACHE) > TRACKER_SCRAPE_CACHE_MAX:
         try:
             _SCRAPE_CACHE.popitem(last=False)
-        except Exception:
+        except KeyError:
             break
 
 
@@ -1512,7 +1512,7 @@ def _tmdb_title_cache_put(key, ids):
     while len(_TMDB_TITLE_CACHE) > TMDB_TITLE_LOOKUP_CACHE_MAX:
         try:
             _TMDB_TITLE_CACHE.popitem(last=False)
-        except Exception:
+        except KeyError:
             break
 
 
@@ -1558,7 +1558,7 @@ def _indexers_cache_put(indexers):
     while len(_INDEXERS_CACHE) > max(PROWLARR_INDEXERS_CACHE_MAX, 1):
         try:
             _INDEXERS_CACHE.popitem(last=False)
-        except Exception:
+        except KeyError:
             break
 
 
@@ -1573,7 +1573,7 @@ def _parse_tracker_host_port(tracker_url):
             return None
         port = port or 6969
         return hostname, port
-    except Exception:
+    except ValueError:
         return None
 
 
@@ -1590,7 +1590,7 @@ async def _resolve_udp_addr(host, port, loop=None):
         loop = asyncio.get_event_loop()
     try:
         infos = await loop.getaddrinfo(host, port, type=socket.SOCK_DGRAM)
-    except Exception as e:
+    except OSError as e:
         logger.debug(f"_resolve_udp_addr: getaddrinfo failed for {host}:{port}: {e}")
         return []
     seen = set()
@@ -1598,7 +1598,7 @@ async def _resolve_udp_addr(host, port, loop=None):
     for addr in infos:
         try:
             ip, p = addr[4][0], addr[4][1]
-        except Exception:
+        except (IndexError, TypeError):
             continue
         key = (ip, p)
         if key not in seen:
@@ -1654,7 +1654,7 @@ async def _udp_scrape_tracker(host, port, chunks, timeout):
         try:
             transport, _ = await loop.create_datagram_endpoint(lambda: proto, remote_addr=(ip, p))
         except Exception as e:
-            logger.debug(f"_udp_scrape_tracker: connect failed to {ip}:{p} ({host}:{port}): {e}")
+            logger.debug(f"_udp_scrape_tracker: connect failed to {ip}:{p} ({host}:{port}): {e}", exc_info=True)
             continue
         try:
             # BEP-15 connect handshake
@@ -1685,7 +1685,7 @@ async def _udp_scrape_tracker(host, port, chunks, timeout):
                         try:
                             payload += bytes.fromhex(h)
                             valid_hashes.append(h)
-                        except Exception:
+                        except (ValueError, struct.error):
                             continue
                     transport.sendto(payload)
                     try:
@@ -1769,7 +1769,8 @@ async def scrape_trackers_inverted(tracker_to_hashes):
         async with sem:
             try:
                 res = await _udp_scrape_tracker(host, port, chunks, TRACKER_SCRAPE_TIMEOUT)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"scrape_trackers_inverted: tracker {url} failed: {e}", exc_info=True)
                 res = {}
         for h, entry in res.items():
             _aggregate(h, entry)

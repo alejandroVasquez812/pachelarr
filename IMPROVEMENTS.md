@@ -72,9 +72,9 @@ A second issue (noted in `AGENTS.md`): `tests/test_integration_prowlarr.py` has 
 **Problem:** ~35 bare `except Exception` blocks exist (see grep over `main.py`). Several are in hot paths (`_infohash_from_xml_item`, `consolidate_and_emit_xml`, scrape parsing) and silently drop data with no log, making failures invisible.
 
 **Tasks:**
-- [ ] Replace broad catches with specific exceptions (`lxml.etree.XMLSyntaxError`, `ValueError`, `KeyError`, `struct.error`).
-- [ ] Where a broad catch is intentional, add `logger.debug(..., exc_info=True)`.
-- [ ] Audit the UDP scrape path (`_udp_scrape_tracker`, `scrape_trackers_inverted`) — most critical for debugging dead trackers.
+- [x] Replace broad catches with specific exceptions (`lxml.etree.XMLSyntaxError`, `ValueError`, `KeyError`, `struct.error`).
+- [x] Where a broad catch is intentional, add `logger.debug(..., exc_info=True)`.
+- [x] Audit the UDP scrape path (`_udp_scrape_tracker`, `scrape_trackers_inverted`) — most critical for debugging dead trackers.
 
 **Effort:** M · **Impact:** Medium (debuggability)
 **Priority:** P2
