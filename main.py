@@ -1,7 +1,17 @@
 import os
 
-from pachelarr import prowlarr, scrape, state, tmdb, torbox, torznab  # noqa: F401
-from pachelarr.app import app, handle_search, healthz, lifespan, statsz, torznab_proxy  # noqa: F401
+from pachelarr import prowlarr, scrape, settings, state, tmdb, torbox, torznab  # noqa: F401
+from pachelarr.app import (  # noqa: F401
+    app,
+    get_setting,
+    get_settings,
+    handle_search,
+    healthz,
+    lifespan,
+    put_settings,
+    statsz,
+    torznab_proxy,
+)
 from pachelarr.prowlarr import (  # noqa: F401
     _collect_indexer_category_ids,
     _indexer_is_enabled,
@@ -33,7 +43,6 @@ from pachelarr.scrape import (  # noqa: F401
 from pachelarr.state import (  # noqa: F401
     _INDEXERS_CACHE,
     _MAGNET_CACHE,
-    _MAGNET_CACHE_MAX,
     _PROWLARR_ENUM_TO_OUR_NAME,
     _SCRAPE_CACHE,
     _SEARCH_PARAMS_FIELD,
@@ -41,33 +50,10 @@ from pachelarr.state import (  # noqa: F401
     _TORZNAB_ID_PARAMS,
     _TORZNAB_NS,
     FOREIGN_LANGUAGE_TAGS,
-    PACHELARR_API_KEY,
-    PACHELARR_SEEDERS_BOOST,
-    PACHELARR_TEST_FALLBACK_QUERY,
-    PROWLARR_API_KEY,
-    PROWLARR_INDEXER_SEARCH_TIMEOUT,
-    PROWLARR_INDEXERS_CACHE_MAX,
-    PROWLARR_INDEXERS_CACHE_TTL,
-    PROWLARR_PARALLEL_INDEXER_CONCURRENCY,
-    PROWLARR_URL,
-    TMDB_API_KEY,
-    TMDB_TITLE_LOOKUP_CACHE_MAX,
-    TMDB_TITLE_LOOKUP_CACHE_TTL,
-    TMDB_TITLE_LOOKUP_ENABLED,
-    TORBOX_API_KEY,
-    TORBOX_CHECK_URL,
-    TORBOX_CHUNK_SIZE,
-    TORBOX_MAX_RETRIES,
-    TORBOX_RETRY_BACKOFF,
-    TRACKER_SCRAPE_BATCH_SIZE,
-    TRACKER_SCRAPE_CACHE_MAX,
-    TRACKER_SCRAPE_CACHE_TTL,
-    TRACKER_SCRAPE_CONCURRENCY,
-    TRACKER_SCRAPE_ENABLED,
-    TRACKER_SCRAPE_TIMEOUT,
     last_search_at,
     last_search_latency_ms,
     logger,
+    magnet_cache_max,
     torbox_hits,
     torbox_misses,
 )

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -6,35 +7,88 @@ import aiohttp
 from fastapi import FastAPI, Request, Response
 from lxml import etree as ET
 
-from pachelarr import state
+from pachelarr import db, settings, state
 
 logger = logging.getLogger("pachelarr")
+
+# Stats flush interval (seconds). Kept as a constant, not a setting, to avoid
+# a loop where flushing a stats-interval setting triggers another flush.
+_STATS_FLUSH_INTERVAL = 30.0
+
+
+async def _stats_flush_loop():
+    """Background task: periodically flush in-memory stats counters to SQLite."""
+    try:
+        while True:
+            await asyncio.sleep(_STATS_FLUSH_INTERVAL)
+            _flush_stats()
+    except asyncio.CancelledError:
+        # Final flush on shutdown.
+        _flush_stats()
+        raise
+
+
+def _flush_stats():
+    try:
+        db.stats_save(
+            state.torbox_hits, state.torbox_misses,
+            state.last_search_latency_ms, state.last_search_at,
+        )
+    except Exception as e:
+        logger.debug(f"stats flush failed: {e}", exc_info=True)
 
 
 @asynccontextmanager
 async def lifespan(app):
-    import main
+    # Initialize the SQLite DB (auto-migrate + seed settings from env on first run).
+    db.init()
+    settings.seed_from_env_if_empty()
+    db.load_caches_into_lru()
+
+    # Seed in-memory stats counters from the DB so they survive restarts.
+    try:
+        loaded = db.stats_load()
+        state.torbox_hits = loaded["torbox_hits"]
+        state.torbox_misses = loaded["torbox_misses"]
+        state.last_search_latency_ms = loaded["last_search_latency_ms"]
+        state.last_search_at = loaded["last_search_at"]
+    except Exception as e:
+        logger.warning(f"Could not load stats from DB (starting fresh): {e}", exc_info=True)
 
     _required = {
-        "PROWLARR_URL": main.PROWLARR_URL,
-        "PROWLARR_API_KEY": main.PROWLARR_API_KEY,
-        "TORBOX_API_KEY": main.TORBOX_API_KEY,
+        "PROWLARR_URL": settings.get_str("PROWLARR_URL"),
+        "PROWLARR_API_KEY": settings.get_str("PROWLARR_API_KEY"),
+        "TORBOX_API_KEY": settings.get_str("TORBOX_API_KEY"),
     }
     _missing = [name for name, val in _required.items() if not (val and str(val).strip())]
     if _missing:
         msg = f"Missing required environment variables: {', '.join(_missing)}. Set them and restart."
         logger.error(msg)
         raise RuntimeError(msg)
-    connector_limit = max(main.PROWLARR_PARALLEL_INDEXER_CONCURRENCY * 2, 16)
+    connector_limit = max(settings.get_int("PROWLARR_PARALLEL_INDEXER_CONCURRENCY", 8) * 2, 16)
     try:
         connector = aiohttp.TCPConnector(limit=connector_limit, limit_per_host=0)
     except (TypeError, ValueError):
         connector = aiohttp.TCPConnector()
     app.state.session = aiohttp.ClientSession(connector=connector)
+
+    # Start the stats flush background task.
+    app.state.stats_flush_task = asyncio.create_task(_stats_flush_loop())
+
     try:
         yield
     finally:
+        # Cancel the flush loop and do a final flush.
+        task = getattr(app.state, "stats_flush_task", None)
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        _flush_stats()
         await app.state.session.close()
+        db.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -89,6 +143,76 @@ async def statsz():
     }
 
 
+# --------------------------------------------------------------------------- #
+# REST settings API
+# --------------------------------------------------------------------------- #
+
+def _check_settings_auth(request: Request):
+    """Return None if authorized, else a Response with the appropriate error."""
+    api_key = settings.get_str("PACHELARR_API_KEY")
+    if not api_key:
+        return Response(status_code=401, content="PACHELARR_API_KEY is not configured")
+    provided = request.headers.get("X-Api-Key") or request.query_params.get("apikey")
+    if not provided:
+        return Response(status_code=401, content="Missing API key")
+    if provided != api_key:
+        return Response(status_code=403, content="Invalid API key")
+    return None
+
+
+@app.get("/settings")
+async def get_settings(request: Request):
+    err = _check_settings_auth(request)
+    if err is not None:
+        return err
+    return settings.snapshot()
+
+
+@app.get("/settings/{key}")
+async def get_setting(key: str, request: Request):
+    err = _check_settings_auth(request)
+    if err is not None:
+        return err
+    if not settings.is_registered(key):
+        return Response(status_code=404, content=f"unknown setting {key!r}")
+    snap = settings.snapshot()
+    return snap[key]
+
+
+@app.put("/settings")
+async def put_settings(request: Request):
+    err = _check_settings_auth(request)
+    if err is not None:
+        return err
+    try:
+        body = await request.json()
+    except Exception:
+        return Response(status_code=400, content="invalid JSON body")
+    if not isinstance(body, dict):
+        return Response(status_code=400, content="expected a JSON object of {key: value}")
+    applied = {}
+    errors = {}
+    for key, value in body.items():
+        if not settings.is_registered(key):
+            errors[key] = "unknown setting"
+            continue
+        try:
+            settings.apply_setting(key, value)
+            applied[key] = settings.get_typed(key)
+        except settings.RestartRequiredError as e:
+            errors[key] = str(e)
+        except ValueError as e:
+            errors[key] = str(e)
+    if errors:
+        return Response(status_code=400, content=str({"applied": applied, "errors": errors}))
+    result = {"applied": applied, "settings": settings.snapshot()}
+    return result
+
+
+# --------------------------------------------------------------------------- #
+# Search handler
+# --------------------------------------------------------------------------- #
+
 async def handle_search(params, session):
     """Performs search, checks cache, and returns enriched results."""
     t0 = time.time()
@@ -110,8 +234,9 @@ async def _handle_search_impl(params, session):
         logger.info(f"Stripped trailing foreign-language tag: {query!r} -> {cleaned_query!r}")
         query = cleaned_query
     has_identifier = any(params.get(k) for k in ('tvdbid', 'imdbid', 'tmdbid', 'season', 'ep'))
+    fallback_query = settings.get_str("PACHELARR_TEST_FALLBACK_QUERY", "")
     if not query and not has_identifier and params.get('cat'):
-        logger.info(f"Incoming category-only request detected; applying fallback query '{main.PACHELARR_TEST_FALLBACK_QUERY}'")  # noqa: E501
+        logger.info(f"Incoming category-only request detected; applying fallback query '{fallback_query}'")  # noqa: E501
     categories = [cat for cat in params.get('cat', '').split(',') if cat]
 
     search_kwargs = {
@@ -180,8 +305,8 @@ async def _handle_search_impl(params, session):
         logger.info('No query nor identifier nor categories present for search; returning empty feed to avoid Prowlarr 400')  # noqa: E501
         return Response(content=torznab.create_empty_rss(), media_type="application/xml")
     if not query and not has_identifier and (params.get('cat') or search_kwargs.get('categories')):
-        logger.info(f"Category-only search detected via raw params; substituting fallback query '{main.PACHELARR_TEST_FALLBACK_QUERY}' for test behavior")  # noqa: E501
-    logger.info(f"Search debug: query={query!r} categories={search_kwargs.get('categories')!r} fallback={main.PACHELARR_TEST_FALLBACK_QUERY!r}")  # noqa: E501
+        logger.info(f"Category-only search detected via raw params; substituting fallback query '{fallback_query}' for test behavior")  # noqa: E501
+    logger.info(f"Search debug: query={query!r} categories={search_kwargs.get('categories')!r} fallback={fallback_query!r}")  # noqa: E501
     logger.debug(f"search_kwargs full: {search_kwargs}")
 
     prowlarr_results_xml = await main.search_prowlarr(session, search_kwargs)
@@ -195,7 +320,7 @@ async def _handle_search_impl(params, session):
     cached_status = await torbox.check_torbox_cache(session, info_hashes)
 
     uncached_seeders = {}
-    if state.TRACKER_SCRAPE_ENABLED:
+    if settings.get_bool("TRACKER_SCRAPE_ENABLED", False):
         logger.debug(f"TRACKER_SCRAPE_ENABLED is on; building tracker_map from {len(prowlarr_results_xml)} XML docs")
         tracker_map = {}
         resolved_count = 0
@@ -226,7 +351,7 @@ async def _handle_search_impl(params, session):
                     except KeyError:
                         proxy = torznab._proxy_url_from_xml_item(item)
                         if proxy:
-                            resolved = await scrape.resolve_magnet_via_download(session, proxy, state.TRACKER_SCRAPE_TIMEOUT)  # noqa: E501
+                            resolved = await scrape.resolve_magnet_via_download(session, proxy, settings.get_float("TRACKER_SCRAPE_TIMEOUT", 5.0))  # noqa: E501
                             scrape._magnet_cache_put(ih, resolved)
                             if resolved and 'tr=' in resolved:
                                 mag = resolved

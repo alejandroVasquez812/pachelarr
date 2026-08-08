@@ -12,6 +12,7 @@ import aiohttp
 from lxml import etree as ET
 
 import main as m
+from pachelarr import settings
 from tests._fakes import FakeCtx
 from tests._torznab_helpers import build_rss, pair
 
@@ -162,7 +163,7 @@ def test_consolidate_all_items_dedupe_and_merge_cached():
     items = root.findall(".//item")
     assert len(items) == 1
     attrs = _attr_map(items[0])
-    assert int(attrs.get("seeders", 0)) >= m.PACHELARR_SEEDERS_BOOST
+    assert int(attrs.get("seeders", 0)) >= settings.get_int("PACHELARR_SEEDERS_BOOST", 10000)
     mag = _guid_magnet(items[0])
     assert "tr=http://tracker1/announce" in mag
     assert "tr=http://tracker2/announce" in mag

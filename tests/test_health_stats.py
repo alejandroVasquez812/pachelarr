@@ -1,28 +1,28 @@
 """Tests for /healthz and /statsz endpoints (improvement #2).
 
-Uses FastAPI's TestClient, which runs the event loop + lifespan internally.
-The lifespan env-validation (improvement #4) raises RuntimeError if the
-required module globals (PROWLARR_URL, PROWLARR_API_KEY, TORBOX_API_KEY) are
-unset, so we set them on the module BEFORE constructing the client.
+ Uses FastAPI's TestClient, which runs the event loop + lifespan internally.
+ The lifespan env-validation (improvement #4) raises RuntimeError if the
+ required settings (PROWLARR_URL, PROWLARR_API_KEY, TORBOX_API_KEY) are unset,
+ so we set them via the settings store BEFORE constructing the client.
 
-Run from the repo root so ``import main`` resolves.
-"""
+ Settings overrides use settings.set_override (the live-getter runtime model),
+ not module globals. Run from the repo root so ``import main`` resolves.
+ """
 import pytest
 from fastapi.testclient import TestClient
 
 import main as m
+from pachelarr import settings
 
 _REQUIRED = ("PROWLARR_URL", "PROWLARR_API_KEY", "TORBOX_API_KEY")
 
 
 @pytest.fixture
 def client():
-    saved = {name: getattr(m, name) for name in _REQUIRED}
-    for name in _REQUIRED:
-        setattr(m, name, "k")
-    m.PROWLARR_URL = "http://x"
-    m.PROWLARR_API_KEY = "k"
-    m.TORBOX_API_KEY = "k"
+    saved = {name: settings.get_typed(name) for name in _REQUIRED}
+    settings.set_override("PROWLARR_URL", "http://x")
+    settings.set_override("PROWLARR_API_KEY", "k")
+    settings.set_override("TORBOX_API_KEY", "k")
     m._INDEXERS_CACHE.clear()
     try:
         with TestClient(m.app) as c:
@@ -30,7 +30,7 @@ def client():
     finally:
         m._INDEXERS_CACHE.clear()
         for name, val in saved.items():
-            setattr(m, name, val)
+            settings.set_override(name, val)
 
 
 def test_healthz_returns_ok(client):

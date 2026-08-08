@@ -51,3 +51,6 @@ radarr_logs*.txt
 # OS
 .DS_Store
 Thumbs.db
+
+# SQLite data dir (local pachelarr.db; mount a volume in containers)
+data/

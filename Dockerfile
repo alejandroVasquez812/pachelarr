@@ -36,6 +36,10 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy the application code
 COPY . .
 
+# Create the SQLite data directory and hand it to the non-root app user so the
+# DB (pachelarr.db) survives container recreation when a volume is mounted on it.
+RUN mkdir -p /app/data && chown -R app:app /app/data
+
 # Set the user
 USER app
 

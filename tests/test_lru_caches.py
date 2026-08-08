@@ -17,10 +17,10 @@ import main as m
 
 def test_magnet_cache_lru_evicts_least_recently_used():
     """With MAX=3, put a,b,c; touch 'a'; put 'd' -> 'b' (LRU) is evicted, 'a' survives."""
-    saved_max = m._MAGNET_CACHE_MAX
+    from pachelarr import settings
     m._MAGNET_CACHE.clear()
+    settings.set_override("TRACKER_SCRAPE_CACHE_MAX", 3)
     try:
-        m._MAGNET_CACHE_MAX = 3
         m._magnet_cache_put('a', 'magnet-a')
         m._magnet_cache_put('b', 'magnet-b')
         m._magnet_cache_put('c', 'magnet-c')
@@ -36,8 +36,8 @@ def test_magnet_cache_lru_evicts_least_recently_used():
         assert 'd' in m._MAGNET_CACHE
         assert len(m._MAGNET_CACHE) == 3
     finally:
+        settings.set_override("TRACKER_SCRAPE_CACHE_MAX", None)
         m._MAGNET_CACHE.clear()
-        m._MAGNET_CACHE_MAX = saved_max
 
 
 def test_magnet_cache_get_raises_keyerror_on_absent_key():
@@ -112,10 +112,10 @@ def test_scrape_cache_get_returns_entry_on_hit():
 
 def test_scrape_cache_put_is_truly_lru():
     """Eviction drops the least-recently-used entry, not the soonest-expiring one."""
-    saved_max = m.TRACKER_SCRAPE_CACHE_MAX
+    from pachelarr import settings
     m._SCRAPE_CACHE.clear()
+    settings.set_override("TRACKER_SCRAPE_CACHE_MAX", 3)
     try:
-        m.TRACKER_SCRAPE_CACHE_MAX = 3
         m._scrape_cache_put('a', {'seeders': 1})
         m._scrape_cache_put('b', {'seeders': 2})
         m._scrape_cache_put('c', {'seeders': 3})
@@ -128,8 +128,8 @@ def test_scrape_cache_put_is_truly_lru():
         assert 'a' in m._SCRAPE_CACHE, "'a' (touched) should survive despite soonest expiry"
         assert len(m._SCRAPE_CACHE) == 3
     finally:
+        settings.set_override("TRACKER_SCRAPE_CACHE_MAX", None)
         m._SCRAPE_CACHE.clear()
-        m.TRACKER_SCRAPE_CACHE_MAX = saved_max
 
 
 def test_indexers_cache_returns_listing_when_fresh():

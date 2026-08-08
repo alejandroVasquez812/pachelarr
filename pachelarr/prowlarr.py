@@ -1,10 +1,11 @@
 import asyncio
 import logging
+import time
 from urllib.parse import urljoin
 
 import aiohttp
 
-from pachelarr import state
+from pachelarr import db, settings, state
 
 logger = logging.getLogger("pachelarr")
 
@@ -59,17 +60,17 @@ def isTorrentIndexer(indexer):
 
 async def get_prowlarr_indexers_cached(session):
     """Fetch the full list of Prowlarr indexers (IndexerResource[]) with caching."""
-    import main
-
     cached = _indexers_cache_get()
     if cached is not None:
         logger.debug(f"Prowlarr indexers cache hit: {len(cached)} indexers")
         return cached
+    prowlarr_url = settings.get_str("PROWLARR_URL")
+    prowlarr_api_key = settings.get_str("PROWLARR_API_KEY")
     try:
-        url = urljoin(main.PROWLARR_URL, "/api/v1/indexer")
-        headers = {"X-Api-Key": main.PROWLARR_API_KEY}
+        url = urljoin(prowlarr_url, "/api/v1/indexer")
+        headers = {"X-Api-Key": prowlarr_api_key}
         logger.debug(
-            f"Prowlarr indexers request: GET {url} headers={{'X-Api-Key': '{_mask_prowlarr_key(main.PROWLARR_API_KEY)}'}}"  # noqa: E501
+            f"Prowlarr indexers request: GET {url} headers={{'X-Api-Key': '{_mask_prowlarr_key(prowlarr_api_key)}'}}"  # noqa: E501
         )
         async with session.get(url, headers=headers) as response:
             response.raise_for_status()
@@ -215,8 +216,6 @@ def build_per_indexer_params(indexer, search_kwargs):
 
 async def _search_one_indexer(session, sem, base_url, headers, indexer, params):
     """Execute one per-indexer Torznab passthrough GET under the concurrency semaphore."""
-    import main
-
     idx_id = indexer.get('id') if isinstance(indexer, dict) else None
     url = urljoin(base_url, f"/{idx_id}/api")
     qp = {}
@@ -234,25 +233,26 @@ async def _search_one_indexer(session, sem, base_url, headers, indexer, params):
         qp['limit'] = params['limit']
     if params.get('offset'):
         qp['offset'] = params['offset']
+    search_timeout = settings.get_float("PROWLARR_INDEXER_SEARCH_TIMEOUT", 10.0)
     async with sem:
         logger.debug(
             f"Prowlarr per-indexer Torznab: GET {url} indexerId={idx_id} "
             f"q={params.get('query')!r} t={params.get('type')!r} cats={params.get('categories')!r} "
-            f"headers={{'X-Api-Key':'{_mask_prowlarr_key(main.PROWLARR_API_KEY)}'}}"
+            f"headers={{'X-Api-Key':'{_mask_prowlarr_key(headers.get('X-Api-Key'))}}}"
         )
         try:
             async with session.get(
                 url,
                 headers=headers,
                 params=qp,
-                timeout=aiohttp.ClientTimeout(total=state.PROWLARR_INDEXER_SEARCH_TIMEOUT),
+                timeout=aiohttp.ClientTimeout(total=search_timeout),
             ) as response:
                 response.raise_for_status()
                 xml_bytes = await response.read()
                 logger.debug(f"Prowlarr indexer {idx_id} returned {len(xml_bytes)} XML bytes")
                 return xml_bytes
         except asyncio.TimeoutError as e:
-            logger.warning(f"Prowlarr per-indexer Torznab search timed out for indexer {idx_id} after {state.PROWLARR_INDEXER_SEARCH_TIMEOUT}s: {e}")  # noqa: E501
+            logger.warning(f"Prowlarr per-indexer Torznab search timed out for indexer {idx_id} after {search_timeout}s: {e}")  # noqa: E501
             return None
         except aiohttp.ClientError as e:
             logger.warning(f"Prowlarr per-indexer Torznab search failed for indexer {idx_id}: {e}")
@@ -264,15 +264,14 @@ async def _search_one_indexer(session, sem, base_url, headers, indexer, params):
 
 async def search_prowlarr_per_indexer(session, tasks):
     """Run per-indexer Torznab searches in parallel; return (indexer, xml_bytes) pairs."""
-    import main
-
     live = [(idx, p) for idx, p in tasks if p is not None]
     if not live:
         logger.debug("search_prowlarr_per_indexer: no live indexer tasks; returning []")
         return []
-    base_url = main.PROWLARR_URL
-    headers = {"X-Api-Key": main.PROWLARR_API_KEY}
-    sem = asyncio.Semaphore(max(main.PROWLARR_PARALLEL_INDEXER_CONCURRENCY, 1))
+    base_url = settings.get_str("PROWLARR_URL")
+    headers = {"X-Api-Key": settings.get_str("PROWLARR_API_KEY")}
+    concurrency = max(settings.get_int("PROWLARR_PARALLEL_INDEXER_CONCURRENCY", 8), 1)
+    sem = asyncio.Semaphore(concurrency)
     coros = [_search_one_indexer(session, sem, base_url, headers, idx, p) for idx, p in live]
     batches = await asyncio.gather(*coros, return_exceptions=False)
     out = [(idx, xml) for (idx, _p), xml in zip(live, batches) if xml is not None]
@@ -309,8 +308,6 @@ async def search_prowlarr(session, search_kwargs):
 
 def _indexers_cache_get():
     """Return the cached indexer list if present and unexpired, else None."""
-    import time
-
     entry = state._INDEXERS_CACHE.get('listing')
     if entry is None:
         return None
@@ -321,15 +318,20 @@ def _indexers_cache_get():
 
 
 def _indexers_cache_put(indexers):
-    """Store the full indexer list under a single 'listing' key with TTL expiry."""
-    import time
-
+    """Store the full indexer list under a single 'listing' key with TTL expiry + SQLite write-through."""
     if indexers is None:
         return
-    state._INDEXERS_CACHE['listing'] = {'indexers': list(indexers), 'expires': time.time() + state.PROWLARR_INDEXERS_CACHE_TTL}  # noqa: E501
+    ttl = settings.get_int("PROWLARR_INDEXERS_CACHE_TTL", 300)
+    max_entries = max(settings.get_int("PROWLARR_INDEXERS_CACHE_MAX", 1), 1)
+    expires = time.time() + ttl
+    state._INDEXERS_CACHE['listing'] = {'indexers': list(indexers), 'expires': expires}
     state._INDEXERS_CACHE.move_to_end('listing')
-    while len(state._INDEXERS_CACHE) > max(state.PROWLARR_INDEXERS_CACHE_MAX, 1):
+    while len(state._INDEXERS_CACHE) > max_entries:
         try:
             state._INDEXERS_CACHE.popitem(last=False)
         except KeyError:
             break
+    try:
+        db.upsert_indexers(list(indexers), expires)
+    except Exception as e:
+        logger.debug(f"_indexers_cache_put: DB upsert failed: {e}", exc_info=True)

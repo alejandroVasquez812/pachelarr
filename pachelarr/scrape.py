@@ -5,7 +5,7 @@ import time
 
 import aiohttp
 
-from pachelarr import state
+from pachelarr import db, settings, state
 
 logger = logging.getLogger("pachelarr")
 
@@ -21,33 +21,40 @@ def _magnet_cache_get(h):
 
 
 def _magnet_cache_put(h, magnet):
-    """Insert magnet (may be None) for hash with true LRU bound."""
-    import main
-
+    """Insert magnet (may be None) for hash with true LRU bound + SQLite write-through."""
     if not h:
         return
     key = h.lower() if isinstance(h, str) else h
     state._MAGNET_CACHE[key] = magnet
     state._MAGNET_CACHE.move_to_end(key)
-    while len(state._MAGNET_CACHE) > main._MAGNET_CACHE_MAX:
+    max_magnet = state.magnet_cache_max()
+    while len(state._MAGNET_CACHE) > max_magnet:
         try:
             state._MAGNET_CACHE.popitem(last=False)
         except KeyError:
             break
+    try:
+        db.upsert_magnet(key, magnet)
+    except Exception as e:
+        logger.debug(f"_magnet_cache_put: DB upsert failed for {key}: {e}", exc_info=True)
 
 
 async def resolve_magnet_via_download(session, download_url, timeout=5.0):
     """Resolve a real magnet URI by following the Prowlarr downloadUrl proxy."""
-    import main
-
     if not download_url:
         return None
     try:
+        prowlarr_url = str(settings.get_str("PROWLARR_URL") or '')
+        headers = {}
+        if download_url.startswith(prowlarr_url):
+            api_key = settings.get_str("PROWLARR_API_KEY")
+            if api_key:
+                headers["X-Api-Key"] = api_key
         async with session.get(
             download_url,
             allow_redirects=False,
             timeout=aiohttp.ClientTimeout(total=timeout),
-            headers={"X-Api-Key": main.PROWLARR_API_KEY} if download_url.startswith(str(main.PROWLARR_URL or '')) else {},  # noqa: E501
+            headers=headers,
         ) as resp:
             loc = resp.headers.get('Location') or resp.headers.get('location')
             if loc and 'magnet:?' in loc:
@@ -85,21 +92,25 @@ def _scrape_cache_get(h):
 
 
 def _scrape_cache_put(h, entry):
-    """Insert/refresh a scrape cache entry for hash with TTL-based expiry."""
-    import main
-
+    """Insert/refresh a scrape cache entry for hash with TTL-based expiry + SQLite write-through."""
     if not h or not entry:
         return
     key = h.lower() if isinstance(h, str) else h
     stored = dict(entry)
-    stored['expires'] = time.time() + state.TRACKER_SCRAPE_CACHE_TTL
+    ttl = settings.get_int("TRACKER_SCRAPE_CACHE_TTL", 300)
+    stored['expires'] = time.time() + ttl
     state._SCRAPE_CACHE[key] = stored
     state._SCRAPE_CACHE.move_to_end(key)
-    while len(state._SCRAPE_CACHE) > main.TRACKER_SCRAPE_CACHE_MAX:
+    max_scrape = settings.get_int("TRACKER_SCRAPE_CACHE_MAX", 5000)
+    while len(state._SCRAPE_CACHE) > max_scrape:
         try:
             state._SCRAPE_CACHE.popitem(last=False)
         except KeyError:
             break
+    try:
+        db.upsert_scrape(key, stored)
+    except Exception as e:
+        logger.debug(f"_scrape_cache_put: DB upsert failed for {key}: {e}", exc_info=True)
 
 
 def _parse_tracker_host_port(tracker_url):
@@ -256,10 +267,10 @@ async def scrape_trackers_inverted(tracker_to_hashes):
     return mapping infohash -> {'seeders':int, 'leechers':int} aggregated as per-metric max
     across trackers. Uses a bounded result cache keyed by lowercased infohash.
     """
-    import main
-
-    sem = asyncio.Semaphore(state.TRACKER_SCRAPE_CONCURRENCY)
-    logger.debug(f"scrape_trackers_inverted: trackers={len(tracker_to_hashes)} concurrency={state.TRACKER_SCRAPE_CONCURRENCY} batch_size={main.TRACKER_SCRAPE_BATCH_SIZE} timeout={state.TRACKER_SCRAPE_TIMEOUT}")  # noqa: E501
+    sem = asyncio.Semaphore(settings.get_int("TRACKER_SCRAPE_CONCURRENCY", 4))
+    batch_size = settings.get_int("TRACKER_SCRAPE_BATCH_SIZE", 50)
+    timeout = settings.get_float("TRACKER_SCRAPE_TIMEOUT", 5.0)
+    logger.debug(f"scrape_trackers_inverted: trackers={len(tracker_to_hashes)} concurrency={settings.get_int('TRACKER_SCRAPE_CONCURRENCY', 4)} batch_size={batch_size} timeout={timeout}")  # noqa: E501
     results_per_hash = {}
     cache_puts = []
 
@@ -289,10 +300,11 @@ async def scrape_trackers_inverted(tracker_to_hashes):
                 uncached.append(h)
         if not uncached:
             return
-        chunks = [uncached[i:i+main.TRACKER_SCRAPE_BATCH_SIZE] for i in range(0, len(uncached), main.TRACKER_SCRAPE_BATCH_SIZE)]  # noqa: E501
+        chunks = [uncached[i:i+batch_size] for i in range(0, len(uncached), batch_size)]
         async with sem:
             try:
-                res = await main._udp_scrape_tracker(host, port, chunks, state.TRACKER_SCRAPE_TIMEOUT)
+                import main
+                res = await main._udp_scrape_tracker(host, port, chunks, timeout)
             except Exception as e:
                 logger.debug(f"scrape_trackers_inverted: tracker {url} failed: {e}", exc_info=True)
                 res = {}

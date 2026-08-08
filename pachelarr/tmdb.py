@@ -3,7 +3,7 @@ import time
 
 import aiohttp
 
-from pachelarr import state
+from pachelarr import db, settings, state
 
 logger = logging.getLogger("pachelarr")
 
@@ -33,15 +33,14 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
     Requires TMDB_API_KEY environment variable.
     Get a free API key at: https://www.themoviedb.org/settings/api
     """
-    import main
-
-    if not main.TMDB_API_KEY:
+    tmdb_api_key = settings.get_str("TMDB_API_KEY")
+    if not tmdb_api_key:
         logger.debug("TMDB_API_KEY not configured, skipping title lookup. Set TMDB_API_KEY env var to enable ID-based search support.")  # noqa: E501
         return None
 
     try:
         if imdbid:
-            url = f"https://api.themoviedb.org/3/find/tt{imdbid}?api_key={main.TMDB_API_KEY}&external_source=imdb_id"
+            url = f"https://api.themoviedb.org/3/find/tt{imdbid}?api_key={tmdb_api_key}&external_source=imdb_id"
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -69,7 +68,7 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
                             return title
 
         if tvdbid:
-            url = f"https://api.themoviedb.org/3/find/{tvdbid}?api_key={main.TMDB_API_KEY}&external_source=tvdb_id"
+            url = f"https://api.themoviedb.org/3/find/{tvdbid}?api_key={tmdb_api_key}&external_source=tvdb_id"
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -86,7 +85,7 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
                             return title
 
         if rid:
-            url = f"https://api.themoviedb.org/3/find/{rid}?api_key={main.TMDB_API_KEY}&external_source=tvrage_id"
+            url = f"https://api.themoviedb.org/3/find/{rid}?api_key={tmdb_api_key}&external_source=tvrage_id"
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -104,7 +103,7 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
 
         if tmdbid:
             if search_type in ('movie', 'search'):
-                url = f"https://api.themoviedb.org/3/movie/{tmdbid}?api_key={main.TMDB_API_KEY}"
+                url = f"https://api.themoviedb.org/3/movie/{tmdbid}?api_key={tmdb_api_key}"
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as response:
                     if response.status == 200:
                         data = await response.json()
@@ -118,7 +117,7 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
                             logger.info(f"Successfully looked up movie via TMDB (TMDB ID): {title}")
                             return title
             else:
-                url = f"https://api.themoviedb.org/3/tv/{tmdbid}?api_key={main.TMDB_API_KEY}"
+                url = f"https://api.themoviedb.org/3/tv/{tmdbid}?api_key={tmdb_api_key}"
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as response:
                     if response.status == 200:
                         data = await response.json()
@@ -150,9 +149,8 @@ async def lookup_identifier_from_query(session, query, search_type='movie'):
     or None on failure/empty. imdbid is stored WITHOUT the 'tt' prefix to match
     codebase convention. Requires TMDB_API_KEY AND TMDB_TITLE_LOOKUP_ENABLED.
     """
-    import main
-
-    if not main.TMDB_API_KEY or not main.TMDB_TITLE_LOOKUP_ENABLED or not query:
+    tmdb_api_key = settings.get_str("TMDB_API_KEY")
+    if not tmdb_api_key or not settings.get_bool("TMDB_TITLE_LOOKUP_ENABLED") or not query:
         logger.debug("Title->ID lookup disabled or missing query/TMDB_API_KEY; skipping.")
         return None
 
@@ -175,7 +173,7 @@ async def lookup_identifier_from_query(session, query, search_type='movie'):
     try:
         tmdb_id = None
         if search_type == 'movie':
-            url = f"https://api.themoviedb.org/3/search/movie?api_key={main.TMDB_API_KEY}&query={stripped}"
+            url = f"https://api.themoviedb.org/3/search/movie?api_key={tmdb_api_key}&query={stripped}"
             if year:
                 url += f"&year={year}"
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as response:
@@ -185,7 +183,7 @@ async def lookup_identifier_from_query(session, query, search_type='movie'):
                     if results:
                         tmdb_id = results[0].get('id')
             if tmdb_id:
-                ext_url = f"https://api.themoviedb.org/3/movie/{tmdb_id}/external_ids?api_key={main.TMDB_API_KEY}"
+                ext_url = f"https://api.themoviedb.org/3/movie/{tmdb_id}/external_ids?api_key={tmdb_api_key}"
                 async with session.get(ext_url, timeout=aiohttp.ClientTimeout(total=3)) as ext_response:
                     if ext_response.status == 200:
                         ext_data = await ext_response.json()
@@ -198,7 +196,7 @@ async def lookup_identifier_from_query(session, query, search_type='movie'):
                         _tmdb_title_cache_put(cache_key, ids)
                         return ids
         elif search_type == 'tvsearch':
-            url = f"https://api.themoviedb.org/3/search/tv?api_key={main.TMDB_API_KEY}&query={stripped}"
+            url = f"https://api.themoviedb.org/3/search/tv?api_key={tmdb_api_key}&query={stripped}"
             if year:
                 url += f"&first_air_date_year={year}"
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as response:
@@ -208,7 +206,7 @@ async def lookup_identifier_from_query(session, query, search_type='movie'):
                     if results:
                         tmdb_id = results[0].get('id')
             if tmdb_id:
-                ext_url = f"https://api.themoviedb.org/3/tv/{tmdb_id}/external_ids?api_key={main.TMDB_API_KEY}"
+                ext_url = f"https://api.themoviedb.org/3/tv/{tmdb_id}/external_ids?api_key={tmdb_api_key}"
                 async with session.get(ext_url, timeout=aiohttp.ClientTimeout(total=3)) as ext_response:
                     if ext_response.status == 200:
                         ext_data = await ext_response.json()
@@ -243,13 +241,26 @@ def _tmdb_title_cache_get(key):
     return entry.get('ids')
 
 
+def _tmdb_key_to_str(key):
+    """Serialize a TMDB cache key tuple to a stable string for SQLite storage."""
+    import json
+    return json.dumps(key, sort_keys=True)
+
+
 def _tmdb_title_cache_put(key, ids):
     if not key or not ids:
         return
-    state._TMDB_TITLE_CACHE[key] = {'ids': dict(ids), 'expires': time.time() + state.TMDB_TITLE_LOOKUP_CACHE_TTL}
+    ttl = settings.get_int("TMDB_TITLE_LOOKUP_CACHE_TTL", 300)
+    max_entries = settings.get_int("TMDB_TITLE_LOOKUP_CACHE_MAX", 5000)
+    expires = time.time() + ttl
+    state._TMDB_TITLE_CACHE[key] = {'ids': dict(ids), 'expires': expires}
     state._TMDB_TITLE_CACHE.move_to_end(key)
-    while len(state._TMDB_TITLE_CACHE) > state.TMDB_TITLE_LOOKUP_CACHE_MAX:
+    while len(state._TMDB_TITLE_CACHE) > max_entries:
         try:
             state._TMDB_TITLE_CACHE.popitem(last=False)
         except KeyError:
             break
+    try:
+        db.upsert_tmdb_title(_tmdb_key_to_str(key), dict(ids), expires)
+    except Exception as e:
+        logger.debug(f"_tmdb_title_cache_put: DB upsert failed for {key}: {e}", exc_info=True)

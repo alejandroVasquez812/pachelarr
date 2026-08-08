@@ -15,6 +15,7 @@ Run from the repo root so `import main` resolves.
 import asyncio
 
 import main as m
+from pachelarr import settings
 from tests._torznab_helpers import build_rss, empty_rss
 
 _TORZNAB_NS = "http://torznab.com/schemas/2015/feed"
@@ -449,7 +450,7 @@ def test_search_prowlarr_per_indexer_one_failure_does_not_abort_others():
 
 
 def test_search_prowlarr_per_indexer_respects_concurrency_cap(monkeypatch):
-    monkeypatch.setattr(m, 'PROWLARR_PARALLEL_INDEXER_CONCURRENCY', 2)
+    settings.set_override("PROWLARR_PARALLEL_INDEXER_CONCURRENCY", 2)
     idxs = [_capable_indexer(id_=i) for i in range(6)]
     tasks = [(idx, m.build_per_indexer_params(idx, {'type': 'movie', 'query': 'X'})) for idx in idxs]
 

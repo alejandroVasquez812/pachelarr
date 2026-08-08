@@ -170,6 +170,7 @@ async def test_scrape_trackers_inverted_multi_chunk_single_call(monkeypatch):
     multiple chunks in a single call (connection reuse)."""
     import main as m
     from main import scrape_trackers_inverted
+    from pachelarr import settings
     m._SCRAPE_CACHE.clear()
 
     observed_chunks = []
@@ -184,7 +185,7 @@ async def test_scrape_trackers_inverted_multi_chunk_single_call(monkeypatch):
 
     monkeypatch.setattr('main._udp_scrape_tracker', fake_udp_scrape_tracker)
     # Force a small batch size so we get multiple chunks.
-    monkeypatch.setattr(m, 'TRACKER_SCRAPE_BATCH_SIZE', 2)
+    settings.set_override("TRACKER_SCRAPE_BATCH_SIZE", 2)
     hashes = [f'h{i:040x}' for i in range(5)]  # 5 hashes -> 3 chunks (2,2,1)
     tracker_map = {'udp://tracker1:6969/announce': hashes}
 

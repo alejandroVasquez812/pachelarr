@@ -12,6 +12,7 @@ import asyncio
 import aiohttp
 
 import main as m
+from pachelarr import settings
 from tests._fakes import FakeCtx
 
 
@@ -60,8 +61,8 @@ _FAKE_XML_PAIRS = [({"id": 1}, b'<rss><channel><item><title>T1</title>'
 
 
 def _enable_title_lookup(monkeypatch):
-    monkeypatch.setattr(m, "TMDB_API_KEY", "test-key")
-    monkeypatch.setattr(m, "TMDB_TITLE_LOOKUP_ENABLED", True)
+    settings.set_override("TMDB_API_KEY", "test-key")
+    settings.set_override("TMDB_TITLE_LOOKUP_ENABLED", True)
     m._TMDB_TITLE_CACHE.clear()
 
 
@@ -92,8 +93,8 @@ def test_lookup_returns_tv_tvdbid_and_imdbid(monkeypatch):
 
 def test_lookup_disabled_by_default(monkeypatch):
     """With TMDB_TITLE_LOOKUP_ENABLED=False, returns None and makes no calls."""
-    monkeypatch.setattr(m, "TMDB_API_KEY", "test-key")
-    monkeypatch.setattr(m, "TMDB_TITLE_LOOKUP_ENABLED", False)
+    settings.set_override("TMDB_API_KEY", "test-key")
+    settings.set_override("TMDB_TITLE_LOOKUP_ENABLED", False)
     m._TMDB_TITLE_CACHE.clear()
     session = FakeSession([("/search/movie", 200, {'results': [{'id': 1}]})])
     ids = _run(m.lookup_identifier_from_query(session, "Inception 2010", search_type='movie'))
@@ -103,8 +104,8 @@ def test_lookup_disabled_by_default(monkeypatch):
 
 def test_lookup_no_api_key(monkeypatch):
     """With TMDB_API_KEY empty + enabled, returns None and makes no calls."""
-    monkeypatch.setattr(m, "TMDB_API_KEY", "")
-    monkeypatch.setattr(m, "TMDB_TITLE_LOOKUP_ENABLED", True)
+    settings.set_override("TMDB_API_KEY", "")
+    settings.set_override("TMDB_TITLE_LOOKUP_ENABLED", True)
     m._TMDB_TITLE_CACHE.clear()
     session = FakeSession([("/search/movie", 200, {'results': [{'id': 1}]})])
     ids = _run(m.lookup_identifier_from_query(session, "Inception 2010", search_type='movie'))
@@ -317,7 +318,7 @@ def test_handle_search_skips_lookup_when_no_query(monkeypatch):
     monkeypatch.setattr(m, "lookup_identifier_from_query", fake_lookup)
     monkeypatch.setattr(m, "search_prowlarr", fake_search)
     # category-only search (no q), with fallback disabled so it returns empty
-    monkeypatch.setattr(m, "PACHELARR_TEST_FALLBACK_QUERY", "")
+    settings.set_override("PACHELARR_TEST_FALLBACK_QUERY", "")
     params = QueryParams({"t": "movie", "cat": "5030"})
     resp = _run(_hs(params))
     # empty feed is returned (no query, no identifier, categories present forwarded)

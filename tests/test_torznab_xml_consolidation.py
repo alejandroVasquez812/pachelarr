@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, unquote
 from lxml import etree as ET
 
 import main as m
+from pachelarr import settings
 from tests._torznab_helpers import build_item, build_rss, pair
 
 _TORZNAB = "{http://torznab.com/schemas/2015/feed}"
@@ -75,7 +76,7 @@ def test_cached_hash_prefix_and_boosted_seeders():
     assert it.find("title").text.startswith("[CACHED] ")
     assert "CachedShow" in it.find("title").text
     seeders = int(_attr_map(it).get("seeders", 0))
-    assert seeders >= m.PACHELARR_SEEDERS_BOOST
+    assert seeders >= settings.get_int("PACHELARR_SEEDERS_BOOST", 10000)
 
 
 def test_uncached_scrape_seeders_peers_take_max():

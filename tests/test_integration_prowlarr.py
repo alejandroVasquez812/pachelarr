@@ -15,6 +15,7 @@ import aiohttp
 from lxml import etree as ET
 
 import main as m
+from pachelarr import settings
 from tests._torznab_helpers import build_rss, empty_rss
 
 _TORZNAB = "{http://torznab.com/schemas/2015/feed}"
@@ -184,7 +185,7 @@ def test_search_prowlarr_forwards_paging(monkeypatch):
 def test_search_prowlarr_fallback_and_categories_list(monkeypatch):
     """Category-only call gets the fallback query and categories as a list."""
     m._INDEXERS_CACHE.clear()
-    m.PACHELARR_TEST_FALLBACK_QUERY = "a"
+    settings.set_override("PACHELARR_TEST_FALLBACK_QUERY", "a")
     try:
         # XML body with a cat-matching item so the wrapper still returns pairs.
         xml = build_rss([{"hash": "aaa", "title": "CatMatch", "seeders": 1}])
@@ -192,14 +193,14 @@ def test_search_prowlarr_fallback_and_categories_list(monkeypatch):
         kwargs = {"categories": ["5030", "5040"]}
         # handle_search would inject the fallback into search_kwargs['query'];
         # mirror that contract here.
-        kwargs["query"] = m.PACHELARR_TEST_FALLBACK_QUERY
+        kwargs["query"] = settings.get_str("PACHELARR_TEST_FALLBACK_QUERY")
         _run(m.search_prowlarr(session, kwargs))
         assert session.last_params is not None
         assert _q(session.last_params) == "a"
         cats = _cat_params(session.last_params)
         assert isinstance(cats, list) and set(cats) == {"5030", "5040"}
     finally:
-        m.PACHELARR_TEST_FALLBACK_QUERY = ""
+        settings.set_override("PACHELARR_TEST_FALLBACK_QUERY", None)
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +238,7 @@ def test_handle_search_category_only_fallback_returns_nonempty_xml(monkeypatch):
     """
     from starlette.datastructures import QueryParams
 
-    m.PACHELARR_TEST_FALLBACK_QUERY = "a"
+    settings.set_override("PACHELARR_TEST_FALLBACK_QUERY", "a")
     try:
         xml = build_rss([{"hash": "aaa", "title": "FallbackItem", "seeders": 1}])
 
@@ -251,7 +252,7 @@ def test_handle_search_category_only_fallback_returns_nonempty_xml(monkeypatch):
         root = ET.fromstring(resp.body)
         assert len(root.findall(".//item")) >= 1
     finally:
-        m.PACHELARR_TEST_FALLBACK_QUERY = ""
+        settings.set_override("PACHELARR_TEST_FALLBACK_QUERY", None)
 
 
 # ---------------------------------------------------------------------------

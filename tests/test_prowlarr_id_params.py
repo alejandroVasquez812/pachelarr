@@ -17,6 +17,7 @@ import asyncio
 import aiohttp
 
 import main as m
+from pachelarr import settings
 
 _EMPTY_RSS = b"<?xml version='1.0' encoding='UTF-8'?>\n<rss version=\"2.0\"><channel><title>x</title></channel></rss>"
 
@@ -191,10 +192,10 @@ def test_search_prowlarr_categories_only_fallback_still_works(monkeypatch):
     before search_prowlarr is called, so we mirror that here and assert it flows
     through unchanged with categories as a list and no ID tokens.
     """
-    m.PACHELARR_TEST_FALLBACK_QUERY = 'a'
+    settings.set_override("PACHELARR_TEST_FALLBACK_QUERY", "a")
     try:
         session = _fake_session()
-        kwargs = {'query': m.PACHELARR_TEST_FALLBACK_QUERY, 'categories': ['5030', '5040']}
+        kwargs = {'query': settings.get_str("PACHELARR_TEST_FALLBACK_QUERY"), 'categories': ['5030', '5040']}
         _run(m.search_prowlarr(session, kwargs))
         p = session.last_params
         assert _q(p) == 'a'
@@ -204,7 +205,7 @@ def test_search_prowlarr_categories_only_fallback_still_works(monkeypatch):
         assert isinstance(cats, list)
         assert '{' not in (_q(p) or '')
     finally:
-        m.PACHELARR_TEST_FALLBACK_QUERY = ''
+        settings.set_override("PACHELARR_TEST_FALLBACK_QUERY", None)
 
 
 def test_search_prowlarr_plain_query_no_ids_unchanged():

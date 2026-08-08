@@ -3,7 +3,7 @@ import logging
 
 import aiohttp
 
-from pachelarr import state
+from pachelarr import settings, state
 from pachelarr.torznab import dedupe_hashes_preserve_order
 
 logger = logging.getLogger("pachelarr")
@@ -11,12 +11,11 @@ logger = logging.getLogger("pachelarr")
 
 async def check_torbox_cache(session, hashes):
     """Checks Torbox cache for a list of info hashes."""
-    import main
-
     try:
+        torbox_api_key = settings.get_str("TORBOX_API_KEY")
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {main.TORBOX_API_KEY}"
+            "Authorization": f"Bearer {torbox_api_key}"
         }
 
         def _mask_key(k):
@@ -33,8 +32,9 @@ async def check_torbox_cache(session, hashes):
         dedupe_removed_count = total_hashes - len(unique_hashes)
         if dedupe_removed_count:
             logger.debug(f"Torbox cache check: dedupe_removed={dedupe_removed_count}")
+        check_url = settings.get_str("TORBOX_CHECK_URL", "https://api.torbox.app/v1/api/torrents/checkcached")
         logger.debug(
-            f"Torbox cache check: POST {state.TORBOX_CHECK_URL} total.hashes={total_hashes} unique.hashes={len(unique_hashes)} dedupe_removed={dedupe_removed_count} Authorization=Bearer {_mask_key(main.TORBOX_API_KEY)}"  # noqa: E501
+            f"Torbox cache check: POST {check_url} total.hashes={total_hashes} unique.hashes={len(unique_hashes)} dedupe_removed={dedupe_removed_count} Authorization=Bearer {_mask_key(torbox_api_key)}"  # noqa: E501
         )
 
         combined = {}
@@ -42,31 +42,33 @@ async def check_torbox_cache(session, hashes):
 
         async def _call_chunk(chunk):
             """Call Torbox for given chunk, return mapping or raise."""
+            max_retries = settings.get_int("TORBOX_MAX_RETRIES", 3)
             attempt = 1
-            backoff = state.TORBOX_RETRY_BACKOFF
-            while attempt <= state.TORBOX_MAX_RETRIES:
+            backoff = settings.get_float("TORBOX_RETRY_BACKOFF", 0.5)
+            while attempt <= max_retries:
                 try:
-                    async with session.post(state.TORBOX_CHECK_URL, json={'hashes': chunk}, headers=headers) as response:  # noqa: E501
+                    async with session.post(check_url, json={'hashes': chunk}, headers=headers) as response:  # noqa: E501
                         if response.status == 401:
                             logger.warning("Torbox returned 401 Unauthorized. Check TORBOX_API_KEY. Aborting cache checks.")  # noqa: E501
                             return None
                         if response.status >= 500:
-                            logger.warning(f"Torbox server error (status {response.status}); attempt {attempt}/{state.TORBOX_MAX_RETRIES}")  # noqa: E501
+                            logger.warning(f"Torbox server error (status {response.status}); attempt {attempt}/{max_retries}")  # noqa: E501
                         else:
                             response.raise_for_status()
                             data = await response.json()
                             return data
                 except aiohttp.ClientError as e:
-                    logger.warning(f"Torbox request error: {e}; attempt {attempt}/{state.TORBOX_MAX_RETRIES}")
+                    logger.warning(f"Torbox request error: {e}; attempt {attempt}/{max_retries}")
                 await asyncio.sleep(backoff)
                 backoff *= 2
                 attempt += 1
             logger.warning("Torbox cache check failed after retries for chunk")
             return {}
 
-        for i in range(0, len(unique_hashes), state.TORBOX_CHUNK_SIZE):
-            chunk = unique_hashes[i:i+state.TORBOX_CHUNK_SIZE]
-            logger.debug(f"Torbox cache chunk: POST {state.TORBOX_CHECK_URL} chunk.len={len(chunk)} Authorization=Bearer {_mask_key(main.TORBOX_API_KEY)}")  # noqa: E501
+        chunk_size = settings.get_int("TORBOX_CHUNK_SIZE", 100)
+        for i in range(0, len(unique_hashes), chunk_size):
+            chunk = unique_hashes[i:i+chunk_size]
+            logger.debug(f"Torbox cache chunk: POST {check_url} chunk.len={len(chunk)} Authorization=Bearer {_mask_key(torbox_api_key)}")  # noqa: E501
             try:
                 result = await _call_chunk(chunk)
                 if result is None:

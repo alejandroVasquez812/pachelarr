@@ -3,7 +3,7 @@ from urllib.parse import parse_qs, unquote
 
 from lxml import etree as ET
 
-from pachelarr import state
+from pachelarr import settings, state
 
 logger = logging.getLogger("pachelarr")
 
@@ -270,7 +270,8 @@ def consolidate_and_emit_xml(indexer_xml_pairs, cached_status, uncached_seeders=
         except (TypeError, ValueError):
             orig_leechers = 0
         if is_cached:
-            _set_xml_attr(canonical_item, 'seeders', str(max(orig_seeders, state.PACHELARR_SEEDERS_BOOST)))
+            boost = settings.get_int("PACHELARR_SEEDERS_BOOST", 10000)
+            _set_xml_attr(canonical_item, 'seeders', str(max(orig_seeders, boost)))
         else:
             entry = uncached_seeders.get(ih) or {}
             try:
