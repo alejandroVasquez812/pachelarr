@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request, Response
 from lxml import etree as ET
 
 from pachelarr import db, settings, state
+from pachelarr.prowlarr import _indexer_is_enabled
 
 logger = logging.getLogger("pachelarr")
 
@@ -140,6 +141,32 @@ async def statsz():
         "last_search_at": state.last_search_at,
         "torbox_hits": state.torbox_hits,
         "torbox_misses": state.torbox_misses,
+    }
+
+
+@app.get("/statsz/indexers")
+async def statsz_indexers():
+    listing = state._INDEXERS_CACHE.get('listing')
+    raw = listing.get('indexers') if listing is not None else None
+    indexers = []
+    if raw:
+        for idx in raw:
+            indexers.append({
+                "id": idx.get('id') or idx.get('indexerId') or idx.get('IndexerId'),
+                "name": idx.get('name') or idx.get('indexerName') or '',
+                "protocol": idx.get('protocol') or '',
+                "enabled": _indexer_is_enabled(idx),
+                "supportsSearch": bool(idx.get('supportsSearch', True)),
+                "requests": 0,
+                "avg_latency_ms": 0,
+                "last_latency_ms": 0,
+                "cached": 0,
+                "uncached": 0,
+                "errors": 0,
+            })
+    return {
+        "generated_at": time.time(),
+        "indexers": indexers,
     }
 
 

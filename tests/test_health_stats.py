@@ -87,3 +87,39 @@ def test_statsz_indexers_cache_age_numeric_when_seeded(client):
         assert isinstance(ic["age_seconds"], int)
     finally:
         m._INDEXERS_CACHE.clear()
+
+
+def test_statsz_indexers_returns_expected_shape(client):
+    m._INDEXERS_CACHE.clear()
+    r = client.get("/statsz/indexers")
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data["indexers"], list)
+    assert isinstance(data["generated_at"], (int, float))
+
+
+def test_statsz_indexers_empty_when_cache_miss(client):
+    m._INDEXERS_CACHE.clear()
+    r = client.get("/statsz/indexers")
+    assert r.status_code == 200
+    assert r.json()["indexers"] == []
+
+
+def test_statsz_indexers_maps_seeded_indexers_with_zeroed_metrics(client):
+    m._INDEXERS_CACHE.clear()
+    m._indexers_cache_put([{"id": 1, "name": "demo", "protocol": "torrent", "enable": True, "supportsSearch": True}])
+    try:
+        r = client.get("/statsz/indexers")
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["indexers"]) == 1
+        entry = data["indexers"][0]
+        assert entry["id"] == 1
+        assert entry["name"] == "demo"
+        assert entry["protocol"] == "torrent"
+        assert entry["enabled"] is True
+        assert entry["supportsSearch"] is True
+        for field in ("requests", "avg_latency_ms", "last_latency_ms", "cached", "uncached", "errors"):
+            assert entry[field] == 0, f"expected {field} to be 0"
+    finally:
+        m._INDEXERS_CACHE.clear()
