@@ -176,6 +176,30 @@ _SCHEMA = [
     )
     """,
     "INSERT OR IGNORE INTO stats (id, updated_at) VALUES (1, 0)",
+    """
+    CREATE TABLE IF NOT EXISTS stats_indexers (
+        indexer_id         INTEGER PRIMARY KEY,
+        requests           INTEGER NOT NULL DEFAULT 0,
+        errors             INTEGER NOT NULL DEFAULT 0,
+        total_latency_ms   REAL NOT NULL DEFAULT 0,
+        last_latency_ms    REAL,
+        cached             INTEGER NOT NULL DEFAULT 0,
+        uncached           INTEGER NOT NULL DEFAULT 0,
+        updated_at         REAL NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS stats_searches (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts               REAL NOT NULL,
+        query            TEXT,
+        search_type      TEXT,
+        latency_ms       REAL,
+        torbox_cached    INTEGER,
+        torbox_uncached  INTEGER,
+        indexer_count    INTEGER
+    )
+    """,
 ]
 
 
@@ -413,6 +437,94 @@ def stats_save(torbox_hits: int, torbox_misses: int,
             (torbox_hits, torbox_misses, last_search_latency_ms,
              last_search_at, time.time()),
         )
+
+
+def upsert_indexer_stats(indexer_id, requests, errors, total_latency_ms,
+                         last_latency_ms, cached, uncached) -> None:
+    """Upsert one indexer's accumulated stats row."""
+    conn = _require_conn()
+    with _lock:
+        conn.execute(
+            "INSERT INTO stats_indexers (indexer_id, requests, errors, "
+            "total_latency_ms, last_latency_ms, cached, uncached, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(indexer_id) DO UPDATE SET requests = excluded.requests, "
+            "errors = excluded.errors, total_latency_ms = excluded.total_latency_ms, "
+            "last_latency_ms = excluded.last_latency_ms, "
+            "cached = excluded.cached, uncached = excluded.uncached, "
+            "updated_at = excluded.updated_at",
+            (int(indexer_id), int(requests), int(errors), float(total_latency_ms),
+             last_latency_ms, int(cached), int(uncached), time.time()),
+        )
+
+
+def load_indexer_stats() -> dict:
+    """Return all per-indexer stats as ``{indexer_id: {requests, errors,
+    total_latency_ms, last_latency_ms, cached, uncached}}``."""
+    conn = _require_conn()
+    with _lock:
+        rows = conn.execute(
+            "SELECT indexer_id, requests, errors, total_latency_ms, "
+            "last_latency_ms, cached, uncached FROM stats_indexers"
+        ).fetchall()
+    out = {}
+    for r in rows:
+        out[int(r["indexer_id"])] = {
+            "requests": int(r["requests"]),
+            "errors": int(r["errors"]),
+            "total_latency_ms": float(r["total_latency_ms"]),
+            "last_latency_ms": r["last_latency_ms"],
+            "cached": int(r["cached"]),
+            "uncached": int(r["uncached"]),
+        }
+    return out
+
+
+def insert_search(record) -> None:
+    """Insert one search record, then prune rows beyond STATS_PER_SEARCH_MAX."""
+    conn = _require_conn()
+    from pachelarr import settings
+    cap = max(settings.get_int("STATS_PER_SEARCH_MAX", 100), 1)
+    with _lock:
+        conn.execute(
+            "INSERT INTO stats_searches (ts, query, search_type, latency_ms, "
+            "torbox_cached, torbox_uncached, indexer_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                record.get("ts"), record.get("query"), record.get("search_type"),
+                record.get("latency_ms"), record.get("torbox_cached"),
+                record.get("torbox_uncached"), record.get("indexer_count"),
+            ),
+        )
+        conn.execute(
+            "DELETE FROM stats_searches WHERE id NOT IN "
+            "(SELECT id FROM stats_searches ORDER BY id DESC LIMIT ?)",
+            (cap,),
+        )
+
+
+def load_searches(limit: int) -> list:
+    """Return the most-recent ``limit`` search records as dicts, newest first."""
+    conn = _require_conn()
+    with _lock:
+        rows = conn.execute(
+            "SELECT ts, query, search_type, latency_ms, torbox_cached, "
+            "torbox_uncached, indexer_count FROM stats_searches "
+            "ORDER BY id DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+    return [
+        {
+            "ts": r["ts"],
+            "query": r["query"],
+            "search_type": r["search_type"],
+            "latency_ms": r["latency_ms"],
+            "torbox_cached": r["torbox_cached"],
+            "torbox_uncached": r["torbox_uncached"],
+            "indexer_count": r["indexer_count"],
+        }
+        for r in rows
+    ]
 
 
 # --------------------------------------------------------------------------- #

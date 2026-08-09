@@ -577,3 +577,92 @@ def test_search_prowlarr_per_indexer_timeout_does_not_abort_others():
     assert len(out) == 1
     assert out[0][0]['id'] == 2
     assert b"GOOD1" in out[0][1]
+
+
+# ---------------------------------------------------------------------------
+# Task 6: per-indexer stat recording
+# ---------------------------------------------------------------------------
+
+def test_search_prowlarr_per_indexer_records_success_stat(monkeypatch):
+    """A successful per-indexer search records a positive latency for its id."""
+    from pachelarr import state as state_mod
+
+    calls = []
+    monkeypatch.setattr(state_mod, "record_indexer_stat",
+                        lambda idx_id, latency_ms, error=False: calls.append(
+                            (idx_id, latency_ms, error)))
+
+    idxs = [_capable_indexer(id_=1), _capable_indexer(id_=2)]
+    tasks = [(idx, m.build_per_indexer_params(idx, {'type': 'movie', 'query': 'X'})) for idx in idxs]
+
+    def search_xml(url, params):
+        iid = _params_idx_id(params, url)
+        return _torznab_xml([{"hash": f"H{iid}", "title": f"T{iid}", "seeders": 1}])
+
+    sess = _IndexerSession([], search_data=search_xml)
+    out = asyncio.new_event_loop().run_until_complete(m.search_prowlarr_per_indexer(sess, tasks))
+    assert len(out) == 2
+    assert len(calls) == 2
+    for idx_id, latency_ms, error in calls:
+        assert idx_id in (1, 2)
+        assert latency_ms >= 0
+        assert error is False
+
+
+def test_search_prowlarr_per_indexer_records_error_stat(monkeypatch):
+    """A failing per-indexer search records error=True for its id."""
+    import aiohttp
+
+    from pachelarr import state as state_mod
+
+    calls = []
+    monkeypatch.setattr(state_mod, "record_indexer_stat",
+                        lambda idx_id, latency_ms, error=False: calls.append(
+                            (idx_id, latency_ms, error)))
+
+    idxs = [_capable_indexer(id_=1), _capable_indexer(id_=2)]
+    tasks = [(idx, m.build_per_indexer_params(idx, {'type': 'movie', 'query': 'X'})) for idx in idxs]
+
+    class FailCtx:
+        def __init__(self, fail):
+            self._fail = fail
+            self.status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def json(self):
+            return []
+
+        async def read(self):
+            return _torznab_xml([{"hash": "OKOK", "title": "T", "seeders": 1}])
+
+        def raise_for_status(self):
+            if self._fail:
+                raise aiohttp.ClientError("indexer down")
+
+    class MixedSession:
+        def __init__(self):
+            self.search_calls = []
+            self.search_urls = []
+
+        def get(self, url, headers=None, params=None, timeout=None):
+            if url.endswith('/api/v1/indexer'):
+                return FakeCtx(200, data=[])
+            self.search_calls.append(params)
+            self.search_urls.append(url)
+            iid = _params_idx_id(params, url)
+            return FailCtx(fail=(iid == '1'))
+
+    sess = MixedSession()
+    out = asyncio.new_event_loop().run_until_complete(m.search_prowlarr_per_indexer(sess, tasks))
+    assert len(out) == 1
+    assert len(calls) == 2
+    by_id = {idx_id: (latency_ms, error) for idx_id, latency_ms, error in calls}
+    assert by_id[1][1] is True   # failing indexer -> error=True
+    assert by_id[2][1] is False  # successful indexer -> error=False
+    assert by_id[1][0] >= 0
+    assert by_id[2][0] >= 0

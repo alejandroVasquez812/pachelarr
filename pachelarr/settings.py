@@ -111,6 +111,13 @@ SETTINGS = {
         "PROWLARR_PARALLEL_INDEXER_CONCURRENCY", "int", 8, "PROWLARR_PARALLEL_INDEXER_CONCURRENCY"),
     "PROWLARR_INDEXER_SEARCH_TIMEOUT": Setting(
         "PROWLARR_INDEXER_SEARCH_TIMEOUT", "float", 10.0, "PROWLARR_INDEXER_SEARCH_TIMEOUT"),
+
+    # --- Stats granularity ---
+    "STATS_ENABLED": Setting("STATS_ENABLED", "bool", True, "STATS_ENABLED"),
+    "STATS_GLOBAL_ENABLED": Setting("STATS_GLOBAL_ENABLED", "bool", True, "STATS_GLOBAL_ENABLED"),
+    "STATS_PER_INDEXER_ENABLED": Setting("STATS_PER_INDEXER_ENABLED", "bool", True, "STATS_PER_INDEXER_ENABLED"),
+    "STATS_PER_SEARCH_ENABLED": Setting("STATS_PER_SEARCH_ENABLED", "bool", True, "STATS_PER_SEARCH_ENABLED"),
+    "STATS_PER_SEARCH_MAX": Setting("STATS_PER_SEARCH_MAX", "int", 100, "STATS_PER_SEARCH_MAX"),
 }
 
 
@@ -272,6 +279,17 @@ def get_bool(key: str, default: bool = False) -> bool:
         return bool(val)
     except (TypeError, ValueError):
         return default
+
+
+def stats_granularity_enabled(name: str) -> bool:
+    """Return True if the given stats granularity is active.
+
+    ``name`` is one of ``"GLOBAL"``, ``"PER_INDEXER"``, ``"PER_SEARCH"``. This
+    is the single gate every hot-path stats check uses: stats collection is
+    off unless the master ``STATS_ENABLED`` kill-switch AND the per-granularity
+    toggle are both on.
+    """
+    return get_bool("STATS_ENABLED", False) and get_bool(f"STATS_{name}_ENABLED", False)
 
 
 # --------------------------------------------------------------------------- #

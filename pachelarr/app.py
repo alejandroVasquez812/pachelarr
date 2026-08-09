@@ -38,6 +38,17 @@ def _flush_stats():
     except Exception as e:
         logger.debug(f"stats flush failed: {e}", exc_info=True)
 
+    # Flush per-indexer stats only when that granularity is enabled.
+    if settings.stats_granularity_enabled("PER_INDEXER"):
+        try:
+            for indexer_id, s in state._INDEXER_STATS.items():
+                db.upsert_indexer_stats(
+                    indexer_id, s["requests"], s["errors"], s["total_latency_ms"],
+                    s["last_latency_ms"], s["cached"], s["uncached"],
+                )
+        except Exception as e:
+            logger.debug(f"indexer stats flush failed: {e}", exc_info=True)
+
 
 @asynccontextmanager
 async def lifespan(app):
@@ -55,6 +66,15 @@ async def lifespan(app):
         state.last_search_at = loaded["last_search_at"]
     except Exception as e:
         logger.warning(f"Could not load stats from DB (starting fresh): {e}", exc_info=True)
+
+    # Load per-indexer stats + recent search history so they survive restarts.
+    try:
+        state._INDEXER_STATS = db.load_indexer_stats()
+        state._SEARCH_HISTORY.clear()
+        for rec in db.load_searches(settings.get_int("STATS_PER_SEARCH_MAX", 100)):
+            state._SEARCH_HISTORY.append(rec)
+    except Exception as e:
+        logger.warning(f"Could not load granular stats from DB (starting fresh): {e}", exc_info=True)
 
     _required = {
         "PROWLARR_URL": settings.get_str("PROWLARR_URL"),
@@ -151,22 +171,35 @@ async def statsz_indexers():
     indexers = []
     if raw:
         for idx in raw:
+            idx_id = idx.get('id') or idx.get('indexerId') or idx.get('IndexerId')
+            stats = state._INDEXER_STATS.get(idx_id, {})
+            requests = stats.get("requests", 0)
+            total_latency_ms = stats.get("total_latency_ms", 0.0)
             indexers.append({
-                "id": idx.get('id') or idx.get('indexerId') or idx.get('IndexerId'),
+                "id": idx_id,
                 "name": idx.get('name') or idx.get('indexerName') or '',
                 "protocol": idx.get('protocol') or '',
                 "enabled": _indexer_is_enabled(idx),
                 "supportsSearch": bool(idx.get('supportsSearch', True)),
-                "requests": 0,
-                "avg_latency_ms": 0,
-                "last_latency_ms": 0,
-                "cached": 0,
-                "uncached": 0,
-                "errors": 0,
+                "requests": requests,
+                "avg_latency_ms": (total_latency_ms / requests) if requests else 0,
+                "last_latency_ms": stats.get("last_latency_ms") or 0,
+                "cached": stats.get("cached", 0),
+                "uncached": stats.get("uncached", 0),
+                "errors": stats.get("errors", 0),
             })
     return {
         "generated_at": time.time(),
         "indexers": indexers,
+    }
+
+
+@app.get("/statsz/searches")
+async def statsz_searches():
+    """Return the in-memory per-search history, most recent first."""
+    return {
+        "generated_at": time.time(),
+        "searches": list(reversed(state._SEARCH_HISTORY)),
     }
 
 
@@ -246,14 +279,17 @@ async def handle_search(params, session):
     try:
         return await _handle_search_impl(params, session)
     finally:
-        state.last_search_at = time.time()
-        state.last_search_latency_ms = (time.time() - t0) * 1000.0
+        if settings.stats_granularity_enabled("GLOBAL"):
+            state.last_search_at = time.time()
+            state.last_search_latency_ms = (time.time() - t0) * 1000.0
 
 
 async def _handle_search_impl(params, session):
     """Performs search, checks cache, and returns enriched results."""
     import main
     from pachelarr import scrape, tmdb, torbox, torznab
+
+    t0 = time.time()
 
     query = params.get('q', '')
     cleaned_query = tmdb.strip_foreign_language_tag(query)
@@ -395,4 +431,58 @@ async def _handle_search_impl(params, session):
         else:
             logger.debug("tracker_map empty; skipping scrape_trackers_inverted (no tr= in any magnet / no magnets returned by Prowlarr)")  # noqa: E501
     xml_response = torznab.consolidate_and_emit_xml(prowlarr_results_xml, cached_status, uncached_seeders)
+
+    # Record per-search stats (latency reflects the whole search). The
+    # record_search helper no-ops when per-search granularity is disabled.
+    state.record_search({
+        "ts": time.time(),
+        "query": query,
+        "search_type": params.get('t', 'search'),
+        "latency_ms": (time.time() - t0) * 1000.0,
+        "torbox_cached": sum(1 for v in cached_status.values() if v),
+        "torbox_uncached": sum(1 for v in cached_status.values() if not v),
+        "indexer_count": len(prowlarr_results_xml),
+    })
+
+    # Fire-and-forget per-indexer cache attribution so it never blocks the
+    # response. No-op when per-indexer granularity is disabled.
+    if settings.stats_granularity_enabled("PER_INDEXER"):
+        asyncio.create_task(_attribute_indexer_cache(prowlarr_results_xml, cached_status))
+
     return Response(content=xml_response, media_type="application/xml")
+
+
+async def _attribute_indexer_cache(xml_pairs, cached_status):
+    """Attribute torbox cached/uncached counts to each indexer.
+
+    Parses each indexer's XML, maps its infohashes onto ``cached_status``, and
+    accumulates the cached/uncached totals via ``state.record_indexer_cache_attribution``.
+    Best-effort: any failure is logged at debug and dropped.
+    """
+    from pachelarr import torznab
+    try:
+        for indexer, xml_bytes in xml_pairs:
+            if not xml_bytes:
+                continue
+            idx_id = indexer.get('id') if isinstance(indexer, dict) else None
+            if idx_id is None:
+                continue
+            cached_n = 0
+            uncached_n = 0
+            try:
+                doc = ET.fromstring(xml_bytes)
+            except ET.XMLSyntaxError:
+                continue
+            seen = set()
+            for item in doc.iter('item'):
+                ih = torznab._infohash_from_xml_item(item)
+                if not ih or ih in seen:
+                    continue
+                seen.add(ih)
+                if cached_status.get(ih):
+                    cached_n += 1
+                else:
+                    uncached_n += 1
+            state.record_indexer_cache_attribution(idx_id, cached_n, uncached_n)
+    except Exception as e:
+        logger.debug(f"indexer cache attribution failed: {e}", exc_info=True)

@@ -341,3 +341,100 @@ def test_stats_zeroed_on_fresh_db(fresh_db):
     loaded = db.stats_load()
     assert loaded["torbox_hits"] == 0
     assert loaded["torbox_misses"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# Per-indexer stats (stats_indexers)
+# --------------------------------------------------------------------------- #
+
+def test_upsert_indexer_stats_inserts_fresh_row(fresh_db):
+    db.upsert_indexer_stats(7, 1, 0, 50.0, 50.0, 1, 2)
+    loaded = db.load_indexer_stats()
+    assert 7 in loaded
+    entry = loaded[7]
+    assert entry["requests"] == 1
+    assert entry["errors"] == 0
+    assert entry["total_latency_ms"] == 50.0
+    assert entry["last_latency_ms"] == 50.0
+    assert entry["cached"] == 1
+    assert entry["uncached"] == 2
+
+
+def test_upsert_indexer_stats_on_conflict_replaces_all_fields(fresh_db):
+    db.upsert_indexer_stats(7, 1, 0, 50.0, 50.0, 1, 2)
+    # Second upsert for the same indexer must replace every field, not merge.
+    db.upsert_indexer_stats(7, 3, 1, 150.0, 60.0, 4, 5)
+    loaded = db.load_indexer_stats()
+    assert len(loaded) == 1
+    entry = loaded[7]
+    assert entry["requests"] == 3
+    assert entry["errors"] == 1
+    assert entry["total_latency_ms"] == 150.0
+    assert entry["last_latency_ms"] == 60.0
+    assert entry["cached"] == 4
+    assert entry["uncached"] == 5
+
+
+def test_load_indexer_stats_returns_expected_shape(fresh_db):
+    db.upsert_indexer_stats(1, 2, 1, 100.0, 40.0, 3, 4)
+    db.upsert_indexer_stats(2, 5, 0, 250.0, 50.0, 0, 5)
+    loaded = db.load_indexer_stats()
+    assert set(loaded.keys()) == {1, 2}
+    for idx_id, entry in loaded.items():
+        for key in ("requests", "errors", "total_latency_ms", "last_latency_ms",
+                    "cached", "uncached"):
+            assert key in entry, f"missing key {key} for indexer {idx_id}"
+
+
+def test_load_indexer_stats_empty_when_no_rows(fresh_db):
+    assert db.load_indexer_stats() == {}
+
+
+# --------------------------------------------------------------------------- #
+# Per-search history (stats_searches)
+# --------------------------------------------------------------------------- #
+
+def _insert_search_records(n, prefix="q"):
+    for i in range(n):
+        db.insert_search({
+            "ts": 1700000000.0 + i,
+            "query": f"{prefix}{i}",
+            "search_type": "search",
+            "latency_ms": 10.0 + i,
+            "torbox_cached": i,
+            "torbox_uncached": 0,
+            "indexer_count": 1,
+        })
+
+
+def test_insert_search_and_load_searches_roundtrip(fresh_db):
+    _insert_search_records(2)
+    rows = db.load_searches(100)
+    assert len(rows) == 2
+    for row in rows:
+        for key in ("ts", "query", "search_type", "latency_ms",
+                    "torbox_cached", "torbox_uncached", "indexer_count"):
+            assert key in row, f"missing key {key}"
+    # Newest first (ORDER BY id DESC).
+    assert rows[0]["query"] == "q1"
+    assert rows[1]["query"] == "q0"
+
+
+def test_insert_search_prunes_beyond_cap(fresh_db):
+    settings.set_override("STATS_PER_SEARCH_MAX", 3)
+    try:
+        # Insert cap + 2 = 5 records; only the newest 3 survive.
+        _insert_search_records(5)
+        rows = db.load_searches(100)
+        assert len(rows) == 3
+        # Newest first: q4, q3, q2.
+        assert [r["query"] for r in rows] == ["q4", "q3", "q2"]
+    finally:
+        settings.set_override("STATS_PER_SEARCH_MAX", None)
+
+
+def test_load_searches_respects_limit(fresh_db):
+    _insert_search_records(5)
+    rows = db.load_searches(2)
+    assert len(rows) == 2
+    assert [r["query"] for r in rows] == ["q4", "q3"]
