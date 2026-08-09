@@ -1,4 +1,6 @@
-import { Card, Title, Text } from "@tremor/react";
+import { Card } from "@/components/Card";
+import { Title } from "@/components/Title";
+import { Text } from "@/components/Text";
 import { fetchSettings, ApiError } from "@/lib/api";
 import SettingsClient from "@/components/SettingsClient";
 

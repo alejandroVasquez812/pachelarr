@@ -1,4 +1,7 @@
-import { Card, Title, DonutChart, Text } from "@tremor/react";
+import { Card } from "@/components/Card";
+import { Title } from "@/components/Title";
+import { Text } from "@/components/Text";
+import { DonutChart } from "@/components/DonutChart";
 
 export default function TorboxRatioDonut({
   hits,
@@ -27,11 +30,12 @@ export default function TorboxRatioDonut({
       <DonutChart
         className="mt-4 h-40"
         data={[
-          { name: "Cached", value: hits, color: "emerald" },
-          { name: "Uncached", value: misses, color: "rose" },
+          { name: "Cached", value: hits },
+          { name: "Uncached", value: misses },
         ]}
-        category="value"
-        index="name"
+        category="name"
+        value="value"
+        colors={["emerald", "gray"]}
         showLabel={false}
       />
       <Text className="mt-2 text-center">

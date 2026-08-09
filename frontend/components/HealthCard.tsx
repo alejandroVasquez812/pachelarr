@@ -1,4 +1,7 @@
-import { Card, Title, Badge, Text } from "@tremor/react";
+import { Card } from "@/components/Card";
+import { Title } from "@/components/Title";
+import { Badge } from "@/components/Badge";
+import { Text } from "@/components/Text";
 import type { Healthz } from "@/lib/types";
 
 function formatRelative(ts: number): string {
@@ -26,7 +29,7 @@ export default function HealthCard({
     <Card>
       <div className="flex items-center justify-between">
         <Title>Health</Title>
-        <Badge color={ok ? "emerald" : "rose"}>
+        <Badge variant={ok ? "success" : "error"}>
           {ok ? "OK" : health ? health.status : "Down"}
         </Badge>
       </div>

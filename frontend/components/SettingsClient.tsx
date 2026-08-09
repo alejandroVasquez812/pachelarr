@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import toast from "react-hot-toast";
-import { Button } from "@tremor/react";
+import { Button } from "@/components/Button";
+import { useToast } from "@/lib/useToast";
 import type {
   SettingsSnapshot,
   PutSettingsError,
@@ -17,6 +17,7 @@ interface SettingsClientProps {
 }
 
 export default function SettingsClient({ initial }: SettingsClientProps) {
+  const { toast } = useToast();
   const [snapshot, setSnapshot] = useState<SettingsSnapshot>(initial);
   const [draft, setDraft] = useState<SettingsSnapshot>(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -94,7 +95,11 @@ export default function SettingsClient({ initial }: SettingsClientProps) {
       if (res.ok) {
         const result = await res.json();
         const appliedCount = Object.keys(result.applied ?? {}).length;
-        toast.success(`${appliedCount} setting(s) saved`);
+        toast({
+          title: "Settings saved",
+          description: `${appliedCount} setting(s) updated.`,
+          variant: "success",
+        });
         // Update the saved snapshot to the server's fresh state, but
         // preserve unsaved edits in OTHER groups by re-applying any draft
         // values that are still dirty (i.e., not part of this PUT body).
@@ -103,12 +108,9 @@ export default function SettingsClient({ initial }: SettingsClientProps) {
         setDraft((prev) => {
           const next: SettingsSnapshot = { ...fresh };
           for (const key of Object.keys(prev)) {
-            // Was this key dirty before the save (i.e., edited locally)?
             const wasDirty = prevDraft[key].value !== snapshot[key].value;
-            // Was it NOT part of the body we just PUT?
             const wasPut = Object.prototype.hasOwnProperty.call(body, key);
             if (wasDirty && !wasPut) {
-              // Preserve the user's unsaved local edit for this key.
               next[key] = prevDraft[key];
             }
           }
@@ -122,7 +124,11 @@ export default function SettingsClient({ initial }: SettingsClientProps) {
       } else {
         const parsed = (await res.json()) as PutSettingsError;
         const failedKeys = Object.keys(parsed.errors ?? {});
-        toast.error(`Some settings failed: ${failedKeys.join(", ")}`);
+        toast({
+          title: "Some settings failed",
+          description: failedKeys.join(", "),
+          variant: "error",
+        });
         setErrors(parsed.errors ?? {});
         // Re-fetch the full snapshot to stay consistent with the backend,
         // then re-apply the still-dirty local edits for the failed keys.
@@ -140,7 +146,11 @@ export default function SettingsClient({ initial }: SettingsClientProps) {
         }
       }
     } catch (e) {
-      toast.error("Failed to save settings");
+      toast({
+        title: "Error",
+        description: "Failed to save settings.",
+        variant: "error",
+      });
     } finally {
       setSavingGroup(null);
     }
@@ -149,7 +159,7 @@ export default function SettingsClient({ initial }: SettingsClientProps) {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-tremor-content-strong dark:text-dark-tremor-content-strong">
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-50">
           Settings
         </h1>
         <Button

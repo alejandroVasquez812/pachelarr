@@ -1,6 +1,6 @@
 "use client";
 
-import { Callout } from "@tremor/react";
+import { Callout } from "@/components/Callout";
 import type { SettingsSnapshot } from "@/lib/types";
 
 interface RestartRequiredBannerProps {
@@ -21,7 +21,7 @@ export default function RestartRequiredBanner({
   if (dirtyRestartKeys.length === 0) return null;
 
   return (
-    <Callout title="Restart required" color="amber">
+    <Callout title="Restart required" variant="warning">
       <ul className="list-disc pl-5 space-y-1">
         {dirtyRestartKeys.map((key) => (
           <li key={key}>

@@ -1,15 +1,15 @@
+import { Card } from "@/components/Card";
+import { Title } from "@/components/Title";
+import { Badge } from "@/components/Badge";
+import { Text } from "@/components/Text";
 import {
-  Card,
-  Title,
-  Badge,
   Table,
   TableHead,
   TableHeaderCell,
   TableBody,
   TableRow,
   TableCell,
-  Text,
-} from "@tremor/react";
+} from "@/components/Table";
 import type { IndexerStat } from "@/lib/types";
 
 function formatLatency(ms: number): string {
@@ -21,7 +21,7 @@ export default function IndexerTable({ indexers }: { indexers: IndexerStat[] }) 
     <Card>
       <div className="flex items-center gap-3">
         <Title>Per-Indexer Analysis</Title>
-        <Badge color="gray">Awaiting instrumentation</Badge>
+        <Badge variant="neutral">Awaiting instrumentation</Badge>
       </div>
       {indexers.length === 0 ? (
         <div className="mt-4">
@@ -48,7 +48,7 @@ export default function IndexerTable({ indexers }: { indexers: IndexerStat[] }) 
                 <TableCell className="font-medium">{ix.name}</TableCell>
                 <TableCell>{ix.protocol}</TableCell>
                 <TableCell>
-                  <Badge color={ix.enabled ? "emerald" : "rose"}>
+                  <Badge variant={ix.enabled ? "success" : "error"}>
                     {ix.enabled ? "Yes" : "No"}
                   </Badge>
                 </TableCell>

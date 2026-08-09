@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
-import { Title, Grid, Col } from "@tremor/react";
+import { Title } from "@/components/Title";
 import type { Healthz, SettingsSnapshot, Statsz, StatszIndexers } from "@/lib/types";
 import { fetchHealthClient, fetchStatsClient, fetchStatsIndexersClient } from "@/lib/client";
 import { RingBuffer } from "@/lib/history";
@@ -76,23 +76,22 @@ export default function DashboardGrid({ initial }: { initial: DashboardInitial }
   return (
     <div className="space-y-6">
       <Title>Pachelarr Dashboard</Title>
-      <Grid numItemsSm={1} numItemsMd={2} numItemsLg={2} className="gap-6">
-        <Col numColSpanSm={1} numColSpanMd={2} numColSpanLg={2}>
+      {/* Tremor Raw has no Grid/Col components — use Tailwind grid utilities. */}
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        <div className="md:col-span-2">
           <IndexerCacheFreshness ageSeconds={currentStats.indexers_cache.age_seconds} />
-        </Col>
+        </div>
         <HealthCard health={currentHealth} lastChecked={lastChecked} />
         <TorboxRatioDonut
           hits={currentStats.torbox_hits}
           misses={currentStats.torbox_misses}
         />
-        <Col numColSpanSm={1} numColSpanMd={2} numColSpanLg={1}>
-          <LatencySparkline samples={samples} />
-        </Col>
+        <LatencySparkline samples={samples} />
         <CacheFillBars stats={currentStats} settings={initial.settings} />
-        <Col numColSpanSm={1} numColSpanMd={2} numColSpanLg={2}>
+        <div className="md:col-span-2">
           <IndexerTable indexers={currentIndexers.indexers} />
-        </Col>
-      </Grid>
+        </div>
+      </div>
     </div>
   );
 }

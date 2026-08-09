@@ -1,14 +1,12 @@
 "use client";
 
-import {
-  Card,
-  Title,
-  Text,
-  Button,
-  TextInput,
-  Switch,
-  Divider,
-} from "@tremor/react";
+import { Card } from "@/components/Card";
+import { Title } from "@/components/Title";
+import { Text } from "@/components/Text";
+import { Button } from "@/components/Button";
+import { Input } from "@/components/Input";
+import { Switch } from "@/components/Switch";
+import { Divider } from "@/components/Divider";
 import type { SettingEntry } from "@/lib/types";
 import { validateField } from "@/lib/validate";
 import SecretField from "./SecretField";
@@ -53,6 +51,7 @@ export default function SettingsGroupCard({
       <div className="flex items-center justify-between">
         <Title>{groupName}</Title>
         <Button
+          variant="primary"
           onClick={onSaveGroup}
           disabled={!groupDirty || hasClientError || isSaving}
         >
@@ -68,7 +67,9 @@ export default function SettingsGroupCard({
           return (
             <div key={key}>
               <div className="flex items-center justify-between gap-2">
-                <Text className="font-medium">{key}</Text>
+                <Text className="font-medium text-gray-900 dark:text-gray-50">
+                  {key}
+                </Text>
                 {dirty && (
                   <span className="h-2 w-2 rounded-full bg-amber-500" />
                 )}
@@ -88,10 +89,10 @@ export default function SettingsGroupCard({
                 ) : entry.type === "bool" ? (
                   <Switch
                     checked={boolValue(entry)}
-                    onChange={(v) => onFieldChange(key, String(v))}
+                    onCheckedChange={(v) => onFieldChange(key, String(v))}
                   />
                 ) : (
-                  <TextInput
+                  <Input
                     type={entry.type === "int" || entry.type === "float" ? "number" : "text"}
                     value={raw}
                     onChange={(e) => onFieldChange(key, e.target.value)}
@@ -99,19 +100,18 @@ export default function SettingsGroupCard({
                 )}
               </div>
               <div className="mt-1 flex items-center justify-between">
-                <Text className="text-tremor-content-subtle dark:text-dark-tremor-content-subtle">
+                <Text color="subtle">
                   default: {String(entry.default ?? "")}
                 </Text>
                 <Button
                   variant="light"
-                  size="xs"
                   onClick={() => onResetField(key)}
                 >
                   Reset
                 </Button>
               </div>
               {error && (
-                <Text color="rose" className="mt-1">
+                <Text className="mt-1 text-red-600 dark:text-red-500">
                   {error}
                 </Text>
               )}

@@ -1,6 +1,9 @@
 "use client";
 
-import { Card, Title, AreaChart, Text } from "@tremor/react";
+import { Card } from "@/components/Card";
+import { Title } from "@/components/Title";
+import { Text } from "@/components/Text";
+import { AreaChart } from "@/components/AreaChart";
 
 export default function LatencySparkline({
   samples,

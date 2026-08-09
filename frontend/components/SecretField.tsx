@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { TextInput, Button } from "@tremor/react";
+import { Input } from "@/components/Input";
+import { Button } from "@/components/Button";
 import type { SettingEntry } from "@/lib/types";
 
 interface SecretFieldProps {
@@ -19,9 +20,12 @@ export default function SecretField({
 }: SecretFieldProps) {
   const [revealed, setRevealed] = useState(false);
 
+  // The Tremor Raw Input toggles its own password visibility when type="password",
+  // but we keep explicit control here so the reveal state is owned by this field
+  // and works alongside the Generate button.
   return (
     <div className="flex items-center gap-2">
-      <TextInput
+      <Input
         type={revealed ? "text" : "password"}
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value)}
@@ -30,13 +34,12 @@ export default function SecretField({
       />
       <Button
         variant="secondary"
-        size="xs"
         onClick={() => setRevealed((r) => !r)}
       >
         {revealed ? "Hide" : "Reveal"}
       </Button>
       {onGenerate && (
-        <Button variant="light" size="xs" onClick={onGenerate}>
+        <Button variant="light" onClick={onGenerate}>
           Generate
         </Button>
       )}

@@ -1,4 +1,6 @@
-import { Card, Title, ProgressBar } from "@tremor/react";
+import { Card } from "@/components/Card";
+import { Title } from "@/components/Title";
+import { ProgressBar } from "@/components/ProgressBar";
 import type { SettingsSnapshot, Statsz } from "@/lib/types";
 import { CACHE_MAX_KEYS } from "@/lib/types";
 
@@ -59,19 +61,19 @@ export default function CacheFillBars({
       <div className="mt-4 space-y-4">
         {rows.map((row) => {
           const pct = row.max > 0 ? (row.size / row.max) * 100 : 0;
-          const color = pct > 80 ? "rose" : "blue";
+          const variant = pct > 80 ? "error" : "default";
           return (
             <div key={row.label}>
               <div className="mb-1 flex items-center justify-between text-sm">
                 <span>{row.label}</span>
-                <span className="text-tremor-content-subtle dark:text-dark-tremor-content-subtle">
+                <span className="text-gray-500 dark:text-gray-500">
                   {row.size} / {row.max}
                 </span>
               </div>
               <ProgressBar
                 value={pct}
-                color={color}
-                tooltip={`${row.size} of ${row.max} (${Math.round(pct)}%)`}
+                variant={variant}
+                label={`${row.size} of ${row.max} (${Math.round(pct)}%)`}
               />
             </div>
           );
