@@ -1,7 +1,18 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Space_Grotesk, Sora } from "next/font/google";
 import { Toaster } from "@/components/Toaster";
 import "./globals.css";
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-heading",
+});
+
+const sora = Sora({
+  subsets: ["latin"],
+  variable: "--font-body",
+});
 
 export const metadata: Metadata = {
   title: "Pachelarr Dashboard",
@@ -16,7 +27,7 @@ export default function RootLayout({
   return (
     // Tremor Raw convention: dark mode via .dark class + bg-gray-950 for the dark background.
     <html lang="en" className="dark antialiased">
-      <body className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-50">
+      <body className={`${spaceGrotesk.variable} ${sora.variable} min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-50`}>
         <div className="flex min-h-screen">
           <aside className="w-56 shrink-0 border-r border-gray-200 p-4 space-y-1 dark:border-gray-800">
             <div className="px-3 py-2 mb-2">

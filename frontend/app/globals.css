@@ -3,6 +3,58 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+:root {
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --text: #0a0a0b;
+  --muted: #6b7280;
+  --accent: #0d9488;
+  --accent-hover: #0f766e;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  --shadow-card: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --ring-focus: #0d9488;
+  --font-heading: system-ui, sans-serif;
+  --font-body: system-ui, sans-serif;
+}
+
+.dark {
+  --bg: #05060a;
+  --surface: #0f1117;
+  --text: #f1f2f5;
+  --muted: #8b92a5;
+  --accent: #14b8a6;
+  --accent-hover: #2dd4bf;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --shadow-card: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --ring-focus: #14b8a6;
+}
+
+body {
+  font-family: var(--font-body), system-ui, sans-serif;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-heading), system-ui, sans-serif;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 @theme {
   --animate-hide: hide 150ms cubic-bezier(0.16, 1, 0.3, 1);
   --animate-slide-down-and-fade: slideDownAndFade 150ms
