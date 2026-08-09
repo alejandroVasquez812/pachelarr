@@ -69,14 +69,74 @@ export interface PutSettingsError {
   errors: Record<string, string>;
 }
 
+export interface SettingsGroupKey {
+  key: string;
+  label: string;
+}
+
+export interface SettingsGroup {
+  name: string;
+  keys: SettingsGroupKey[];
+}
+
 // Settings grouping (mirrors pachelarr/settings.py SETTINGS registry order)
-export const SETTINGS_GROUPS: { name: string; keys: string[] }[] = [
-  { name: "Prowlarr Connection", keys: ["PROWLARR_URL", "PROWLARR_API_KEY"] },
-  { name: "Torbox", keys: ["TORBOX_API_KEY", "TORBOX_CHECK_URL", "TORBOX_CHUNK_SIZE", "TORBOX_MAX_RETRIES", "TORBOX_RETRY_BACKOFF"] },
-  { name: "Pachelarr", keys: ["PACHELARR_API_KEY", "PACHELARR_SEEDERS_BOOST", "PACHELARR_TEST_FALLBACK_QUERY", "PACHELARR_DATA_DIR", "PACHELARR_LOG_LEVEL"] },
-  { name: "TMDB", keys: ["TMDB_API_KEY", "TMDB_TITLE_LOOKUP_ENABLED", "TMDB_TITLE_LOOKUP_CACHE_TTL", "TMDB_TITLE_LOOKUP_CACHE_MAX"] },
-  { name: "Tracker Scraping", keys: ["TRACKER_SCRAPE_ENABLED", "TRACKER_SCRAPE_CONCURRENCY", "TRACKER_SCRAPE_TIMEOUT", "TRACKER_SCRAPE_BATCH_SIZE", "TRACKER_SCRAPE_CACHE_TTL", "TRACKER_SCRAPE_CACHE_MAX"] },
-  { name: "Prowlarr Search / Cache", keys: ["PROWLARR_INDEXERS_CACHE_TTL", "PROWLARR_INDEXERS_CACHE_MAX", "PROWLARR_PARALLEL_INDEXER_CONCURRENCY", "PROWLARR_INDEXER_SEARCH_TIMEOUT"] },
+export const SETTINGS_GROUPS: SettingsGroup[] = [
+  {
+    name: "Prowlarr Connection",
+    keys: [
+      { key: "PROWLARR_URL", label: "Prowlarr URL" },
+      { key: "PROWLARR_API_KEY", label: "API key" },
+    ],
+  },
+  {
+    name: "Torbox",
+    keys: [
+      { key: "TORBOX_API_KEY", label: "API key" },
+      { key: "TORBOX_CHECK_URL", label: "Cache check URL" },
+      { key: "TORBOX_CHUNK_SIZE", label: "Chunk size" },
+      { key: "TORBOX_MAX_RETRIES", label: "Max retries" },
+      { key: "TORBOX_RETRY_BACKOFF", label: "Retry backoff" },
+    ],
+  },
+  {
+    name: "Pachelarr",
+    keys: [
+      { key: "PACHELARR_API_KEY", label: "API key" },
+      { key: "PACHELARR_SEEDERS_BOOST", label: "Seeders boost" },
+      { key: "PACHELARR_TEST_FALLBACK_QUERY", label: "Test fallback query" },
+      { key: "PACHELARR_DATA_DIR", label: "Data directory" },
+      { key: "PACHELARR_LOG_LEVEL", label: "Log level" },
+    ],
+  },
+  {
+    name: "TMDB",
+    keys: [
+      { key: "TMDB_API_KEY", label: "API key" },
+      { key: "TMDB_TITLE_LOOKUP_ENABLED", label: "Title lookup enabled" },
+      { key: "TMDB_TITLE_LOOKUP_CACHE_TTL", label: "Title cache TTL" },
+      { key: "TMDB_TITLE_LOOKUP_CACHE_MAX", label: "Title cache max" },
+    ],
+  },
+  {
+    name: "Tracker Scraping",
+    keys: [
+      { key: "TRACKER_SCRAPE_ENABLED", label: "Tracker scraping" },
+      { key: "TRACKER_SCRAPE_CONCURRENCY", label: "Concurrency" },
+      { key: "TRACKER_SCRAPE_TIMEOUT", label: "Timeout" },
+      { key: "TRACKER_SCRAPE_BATCH_SIZE", label: "Batch size" },
+      { key: "TRACKER_SCRAPE_CACHE_TTL", label: "Cache TTL" },
+      { key: "TRACKER_SCRAPE_CACHE_MAX", label: "Cache max" },
+    ],
+  },
+  {
+    name: "Prowlarr Search / Cache",
+    keys: [
+      { key: "PROWLARR_INDEXERS_CACHE_TTL", label: "Indexers cache TTL" },
+      { key: "PROWLARR_INDEXERS_CACHE_MAX", label: "Indexers cache max" },
+      { key: "PROWLARR_PARALLEL_INDEXER_CONCURRENCY", label: "Parallel indexer concurrency" },
+      { key: "PROWLARR_INDEXER_SEARCH_TIMEOUT", label: "Indexer search timeout" },
+    ],
+  },
 ];
 
 // Required secrets that must not be blank-saved without confirmation.

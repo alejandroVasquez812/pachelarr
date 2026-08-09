@@ -44,19 +44,6 @@ export default function SettingsClient({ initial }: SettingsClientProps) {
     });
   };
 
-  const handleResetField = (key: string) => {
-    setDraft((prev) => ({
-      ...prev,
-      [key]: { ...prev[key], value: prev[key].default },
-    }));
-    setErrors((prev) => {
-      if (!(key in prev)) return prev;
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-  };
-
   const handleDiscardAll = () => {
     setDraft(snapshot);
     setErrors({});
@@ -66,7 +53,9 @@ export default function SettingsClient({ initial }: SettingsClientProps) {
     const group = SETTINGS_GROUPS.find((g) => g.name === groupName);
     if (!group) return;
 
-    const dirtyInGroup = group.keys.filter((key) => dirtyKeys.has(key));
+    const dirtyInGroup = group.keys
+      .map((k) => k.key)
+      .filter((key) => dirtyKeys.has(key));
     if (dirtyInGroup.length === 0) return;
 
     const body: Record<string, string | number | boolean | null> = {};
@@ -178,12 +167,11 @@ export default function SettingsClient({ initial }: SettingsClientProps) {
           key={group.name}
           groupName={group.name}
           entries={group.keys
-            .filter((key) => draft[key])
-            .map((key) => ({ key, entry: draft[key] }))}
+            .filter((k) => draft[k.key])
+            .map((k) => ({ keyDef: k, entry: draft[k.key] }))}
           dirtyKeys={dirtyKeys}
           errors={errors}
           onFieldChange={handleFieldChange}
-          onResetField={handleResetField}
           onSaveGroup={() => handleSaveGroup(group.name)}
           isSaving={savingGroup === group.name}
         />

@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { RiEyeFill, RiEyeOffFill, RiKeyLine } from "@remixicon/react";
 import { Input } from "@/components/Input";
-import { Button } from "@/components/Button";
+import { cx, focusRing } from "@/lib/utils";
 import type { SettingEntry } from "@/lib/types";
 
 interface SecretFieldProps {
@@ -32,16 +33,43 @@ export default function SecretField({
         placeholder={entry.secret ? "••••••••" : ""}
         className="flex-1"
       />
-      <Button
-        variant="secondary"
+      <button
+        type="button"
+        aria-label={revealed ? "Hide secret" : "Reveal secret"}
         onClick={() => setRevealed((r) => !r)}
+        className={cx(
+          // base
+          "inline-flex h-11 w-11 items-center justify-center rounded-md outline-hidden transition-colors",
+          // text
+          "text-[var(--muted)]",
+          // hover
+          "hover:text-[var(--text)]",
+          focusRing,
+        )}
       >
-        {revealed ? "Hide" : "Reveal"}
-      </Button>
+        {revealed ? (
+          <RiEyeOffFill aria-hidden="true" className="size-5 shrink-0" />
+        ) : (
+          <RiEyeFill aria-hidden="true" className="size-5 shrink-0" />
+        )}
+      </button>
       {onGenerate && (
-        <Button variant="light" onClick={onGenerate}>
-          Generate
-        </Button>
+        <button
+          type="button"
+          aria-label="Generate secret"
+          onClick={onGenerate}
+          className={cx(
+            // base
+            "inline-flex h-11 w-11 items-center justify-center rounded-md outline-hidden transition-colors",
+            // text
+            "text-[var(--muted)]",
+            // hover
+            "hover:text-[var(--text)]",
+            focusRing,
+          )}
+        >
+          <RiKeyLine aria-hidden="true" className="size-5 shrink-0" />
+        </button>
       )}
     </div>
   );

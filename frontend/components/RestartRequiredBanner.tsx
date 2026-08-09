@@ -22,7 +22,7 @@ export default function RestartRequiredBanner({
 
   return (
     <Callout title="Restart required" variant="warning">
-      <ul className="list-disc pl-5 space-y-1">
+      <ul className="list-disc space-y-1 pl-5">
         {dirtyRestartKeys.map((key) => (
           <li key={key}>
             <span className="font-medium">{key}</span> — editing requires a

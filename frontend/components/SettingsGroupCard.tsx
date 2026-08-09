@@ -7,17 +7,16 @@ import { Button } from "@/components/Button";
 import { Input } from "@/components/Input";
 import { Switch } from "@/components/Switch";
 import { Divider } from "@/components/Divider";
-import type { SettingEntry } from "@/lib/types";
+import type { SettingEntry, SettingsGroupKey } from "@/lib/types";
 import { validateField } from "@/lib/validate";
 import SecretField from "./SecretField";
 
 interface SettingsGroupCardProps {
   groupName: string;
-  entries: { key: string; entry: SettingEntry }[];
+  entries: { keyDef: SettingsGroupKey; entry: SettingEntry }[];
   dirtyKeys: Set<string>;
   errors: Record<string, string>;
   onFieldChange: (key: string, rawString: string) => void;
-  onResetField: (key: string) => void;
   onSaveGroup: () => void;
   isSaving: boolean;
 }
@@ -36,45 +35,56 @@ export default function SettingsGroupCard({
   dirtyKeys,
   errors,
   onFieldChange,
-  onResetField,
   onSaveGroup,
   isSaving,
 }: SettingsGroupCardProps) {
-  const groupDirty = entries.some(({ key }) => dirtyKeys.has(key));
+  const groupDirty = entries.some(({ keyDef }) => dirtyKeys.has(keyDef.key));
   const hasClientError = entries.some(
-    ({ key, entry }) =>
-      dirtyKeys.has(key) && validateField(key, String(entry.value ?? ""), entry),
+    ({ keyDef, entry }) =>
+      dirtyKeys.has(keyDef.key) && validateField(keyDef.key, String(entry.value ?? ""), entry),
   );
 
   return (
     <Card>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <Title>{groupName}</Title>
         <Button
           variant="primary"
           onClick={onSaveGroup}
           disabled={!groupDirty || hasClientError || isSaving}
+          isLoading={isSaving}
         >
           Save
         </Button>
       </div>
       <Divider />
-      <div className="space-y-4">
-        {entries.map(({ key, entry }) => {
+      <div className="space-y-5">
+        {entries.map(({ keyDef, entry }) => {
+          const key = keyDef.key;
+          const label = keyDef.label;
           const dirty = dirtyKeys.has(key);
           const error = errors[key];
           const raw = String(entry.value ?? "");
           return (
             <div key={key}>
-              <div className="flex items-center justify-between gap-2">
-                <Text className="font-medium text-gray-900 dark:text-gray-50">
-                  {key}
-                </Text>
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor={`setting-${key}`}
+                  className="text-sm text-[var(--muted)]"
+                >
+                  {label}
+                </label>
                 {dirty && (
-                  <span className="h-2 w-2 rounded-full bg-amber-500" />
+                  <span
+                    className="inline-flex items-center text-xs font-medium text-[var(--accent)]"
+                    aria-hidden="true"
+                  >
+                    <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
+                    modified
+                  </span>
                 )}
               </div>
-              <div className="mt-1">
+              <div className="mt-1.5">
                 {entry.secret ? (
                   <SecretField
                     entry={entry}
@@ -88,30 +98,21 @@ export default function SettingsGroupCard({
                   />
                 ) : entry.type === "bool" ? (
                   <Switch
+                    id={`setting-${key}`}
                     checked={boolValue(entry)}
                     onCheckedChange={(v) => onFieldChange(key, String(v))}
                   />
                 ) : (
                   <Input
+                    id={`setting-${key}`}
                     type={entry.type === "int" || entry.type === "float" ? "number" : "text"}
                     value={raw}
                     onChange={(e) => onFieldChange(key, e.target.value)}
                   />
                 )}
               </div>
-              <div className="mt-1 flex items-center justify-between">
-                <Text color="subtle">
-                  default: {String(entry.default ?? "")}
-                </Text>
-                <Button
-                  variant="light"
-                  onClick={() => onResetField(key)}
-                >
-                  Reset
-                </Button>
-              </div>
               {error && (
-                <Text className="mt-1 text-red-600 dark:text-red-500">
+                <Text className="mt-1.5 text-sm text-[var(--error)]">
                   {error}
                 </Text>
               )}
