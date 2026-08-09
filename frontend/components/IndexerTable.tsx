@@ -30,7 +30,6 @@ export default function IndexerTable({ indexers }: { indexers: IndexerStat[] }) 
     <Card>
       <div className="flex items-center gap-3">
         <Title>Per-Indexer Analysis</Title>
-        <Badge variant="neutral">Awaiting instrumentation</Badge>
       </div>
       {indexers.length === 0 ? (
         <div className="mt-4">

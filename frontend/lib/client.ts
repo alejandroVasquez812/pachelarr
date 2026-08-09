@@ -6,7 +6,7 @@
 // server-side route handler at app/api/settings/route.ts which injects
 // the key from server env.
 
-import type { Healthz, Statsz, StatszIndexers } from "./types";
+import type { Healthz, Statsz, StatszIndexers, StatszSearches } from "./types";
 
 export async function fetchHealthClient(): Promise<Healthz> {
   const res = await fetch("/api/healthz", { cache: "no-store" });
@@ -23,5 +23,11 @@ export async function fetchStatsClient(): Promise<Statsz> {
 export async function fetchStatsIndexersClient(): Promise<StatszIndexers> {
   const res = await fetch("/api/statsz/indexers", { cache: "no-store" });
   if (!res.ok) throw new Error(`/api/statsz/indexers ${res.status}`);
+  return res.json();
+}
+
+export async function fetchStatsSearchesClient(): Promise<StatszSearches> {
+  const res = await fetch("/api/statsz/searches", { cache: "no-store" });
+  if (!res.ok) throw new Error(`/api/statsz/searches ${res.status}`);
   return res.json();
 }
