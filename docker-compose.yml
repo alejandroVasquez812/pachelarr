@@ -76,3 +76,20 @@ services:
       # Number of info hashes to scrape per tracker request (default: 50)
       - TRACKER_SCRAPE_BATCH_SIZE=50
     restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pachelarr-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      # Internal docker-network URL of the backend.
+      # Port MUST match the backend's PACHELARR_PORT (currently 6800, NOT 8080).
+      - PACHELARR_BACKEND_URL=http://pachelarr:6800
+      # Server-side API key for /settings proxy. Passed through from host env / .env.
+      - PACHELARR_API_KEY=${PACHELARR_API_KEY}
+    depends_on:
+      - pachelarr
+    restart: unless-stopped
