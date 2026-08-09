@@ -439,8 +439,10 @@ async def _handle_search_impl(params, session):
         "query": query,
         "search_type": params.get('t', 'search'),
         "latency_ms": (time.time() - t0) * 1000.0,
-        "torbox_cached": sum(1 for v in cached_status.values() if v),
-        "torbox_uncached": sum(1 for v in cached_status.values() if not v),
+        "torbox_cached": len(cached_status),
+        # cached_status only holds hit hashes (misses are absent), so uncached
+        # is the set difference of all hashes vs cached ones.
+        "torbox_uncached": max(len(info_hashes) - len(cached_status), 0),
         "indexer_count": len(prowlarr_results_xml),
     })
 
