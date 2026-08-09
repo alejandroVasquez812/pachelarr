@@ -16,11 +16,11 @@ const Card = React.forwardRef<HTMLDivElement, CardProps>(
         ref={forwardedRef}
         className={cx(
           // base
-          "relative w-full rounded-lg border p-6 text-left shadow-xs",
+          "relative w-full rounded-lg border p-6 text-left shadow-[var(--shadow-card)]",
           // background color
-          "bg-white dark:bg-[#090E1A]",
+          "bg-[var(--surface)]",
           // border color
-          "border-gray-200 dark:border-gray-900",
+          "border-[var(--border)]",
           className,
         )}
         tremor-id="tremor-raw"

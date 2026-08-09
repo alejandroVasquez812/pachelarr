@@ -21,27 +21,25 @@ const buttonVariants = tv({
         // border
         "border-transparent",
         // text color
-        "text-white dark:text-white",
+        "text-white",
         // background color
-        "bg-blue-500 dark:bg-blue-500",
+        "bg-[var(--accent)]",
         // hover color
-        "hover:bg-blue-600 dark:hover:bg-blue-600",
+        "hover:bg-[var(--accent-hover)]",
         // disabled
-        "disabled:bg-blue-300 disabled:text-white",
-        "dark:disabled:bg-blue-800 dark:disabled:text-blue-400",
+        "disabled:bg-[var(--accent)]/40 disabled:text-white",
       ],
       secondary: [
         // border
-        "border-gray-300 dark:border-gray-800",
+        "border-[var(--border)]",
         // text color
-        "text-gray-900 dark:text-gray-50",
+        "text-[var(--text)]",
         // background color
-        "bg-white dark:bg-gray-950",
-        //hover color
-        "hover:bg-gray-50 dark:hover:bg-gray-900/60",
+        "bg-[var(--surface)]",
+        // hover color
+        "hover:bg-[var(--bg)]",
         // disabled
-        "disabled:text-gray-400",
-        "dark:disabled:text-gray-600",
+        "disabled:text-[var(--muted)]",
       ],
       light: [
         // base
@@ -49,14 +47,13 @@ const buttonVariants = tv({
         // border
         "border-transparent",
         // text color
-        "text-gray-900 dark:text-gray-50",
+        "text-[var(--text)]",
         // background color
-        "bg-gray-200 dark:bg-gray-900",
+        "bg-[var(--bg)]",
         // hover color
-        "hover:bg-gray-300/70 dark:hover:bg-gray-800/80",
+        "hover:bg-[var(--border-strong)]",
         // disabled
-        "disabled:bg-gray-100 disabled:text-gray-400",
-        "dark:disabled:bg-gray-800 dark:disabled:text-gray-600",
+        "disabled:bg-[var(--bg)] disabled:text-[var(--muted)]",
       ],
       ghost: [
         // base
@@ -64,12 +61,11 @@ const buttonVariants = tv({
         // border
         "border-transparent",
         // text color
-        "text-gray-900 dark:text-gray-50",
+        "text-[var(--text)]",
         // hover color
-        "bg-transparent hover:bg-gray-100 dark:hover:bg-gray-800/80",
+        "bg-transparent hover:bg-[var(--bg)]",
         // disabled
-        "disabled:text-gray-400",
-        "dark:disabled:text-gray-600",
+        "disabled:text-[var(--muted)]",
       ],
       destructive: [
         // text color
@@ -77,12 +73,11 @@ const buttonVariants = tv({
         // border
         "border-transparent",
         // background color
-        "bg-red-600 dark:bg-red-700",
+        "bg-[var(--error)]",
         // hover color
-        "hover:bg-red-700 dark:hover:bg-red-600",
+        "hover:bg-[var(--error)]/90",
         // disabled
-        "disabled:bg-red-300 disabled:text-white",
-        "dark:disabled:bg-red-950 dark:disabled:text-red-400",
+        "disabled:bg-[var(--error)]/30 disabled:text-white",
       ],
     },
   },

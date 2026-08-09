@@ -14,7 +14,7 @@ const Title = React.forwardRef<HTMLHeadingElement, TitleProps>(
           // base
           "text-lg font-semibold",
           // text color
-          "text-gray-900 dark:text-gray-50",
+          "text-[var(--text)]",
           className,
         )}
         tremor-id="tremor-raw"

@@ -17,8 +17,8 @@ const Text = React.forwardRef<HTMLParagraphElement, TextProps>(
           "text-sm",
           // text color
           color === "subtle"
-            ? "text-gray-500 dark:text-gray-500"
-            : "text-gray-600 dark:text-gray-400",
+            ? "text-[var(--muted)]"
+            : "text-[var(--text)]",
           className,
         )}
         tremor-id="tremor-raw"
