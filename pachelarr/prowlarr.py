@@ -240,6 +240,7 @@ async def _search_one_indexer(session, sem, base_url, headers, indexer, params):
             f"q={params.get('query')!r} t={params.get('type')!r} cats={params.get('categories')!r} "
             f"headers={{'X-Api-Key':'{_mask_prowlarr_key(headers.get('X-Api-Key'))}}}"
         )
+        _t0 = time.perf_counter()
         try:
             async with session.get(
                 url,
@@ -249,15 +250,23 @@ async def _search_one_indexer(session, sem, base_url, headers, indexer, params):
             ) as response:
                 response.raise_for_status()
                 xml_bytes = await response.read()
+                _elapsed_ms = (time.perf_counter() - _t0) * 1000.0
+                state.record_indexer_stat(idx_id, _elapsed_ms, error=False)
                 logger.debug(f"Prowlarr indexer {idx_id} returned {len(xml_bytes)} XML bytes")
                 return xml_bytes
         except asyncio.TimeoutError as e:
+            _elapsed_ms = (time.perf_counter() - _t0) * 1000.0
+            state.record_indexer_stat(idx_id, _elapsed_ms, error=True)
             logger.warning(f"Prowlarr per-indexer Torznab search timed out for indexer {idx_id} after {search_timeout}s: {e}")  # noqa: E501
             return None
         except aiohttp.ClientError as e:
+            _elapsed_ms = (time.perf_counter() - _t0) * 1000.0
+            state.record_indexer_stat(idx_id, _elapsed_ms, error=True)
             logger.warning(f"Prowlarr per-indexer Torznab search failed for indexer {idx_id}: {e}")
             return None
         except Exception as e:
+            _elapsed_ms = (time.perf_counter() - _t0) * 1000.0
+            state.record_indexer_stat(idx_id, _elapsed_ms, error=True)
             logger.warning(f"Prowlarr per-indexer Torznab search error for indexer {idx_id}: {e}", exc_info=True)
             return None
 

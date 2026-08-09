@@ -28,6 +28,8 @@ def _reset_state():
     state.torbox_misses = 0
     state.last_search_latency_ms = None
     state.last_search_at = None
+    state._INDEXER_STATS.clear()
+    state._SEARCH_HISTORY.clear()
     settings.clear_overrides()
 
 
