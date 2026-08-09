@@ -112,6 +112,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       { key: "TORBOX_CHUNK_SIZE", label: "Chunk size" },
       { key: "TORBOX_MAX_RETRIES", label: "Max retries" },
       { key: "TORBOX_RETRY_BACKOFF", label: "Retry backoff" },
+      { key: "TORBOX_CACHE_MAX", label: "Known-cached hash cap" },
     ],
   },
   {
