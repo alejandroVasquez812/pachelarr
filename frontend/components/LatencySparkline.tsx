@@ -13,7 +13,7 @@ export default function LatencySparkline({
   const data = samples.map((v, i) => ({ i, ms: v ?? 0 }));
   const nonNullSamples = samples.filter((v): v is number => v !== null && v !== undefined);
   const hasData = nonNullSamples.length > 0;
-  const current = nonNullSamples.length > 0 ? nonNullSamples[nonNullSamples.length - 1] : null;
+  const current = hasData ? nonNullSamples[nonNullSamples.length - 1] : null;
 
   if (!hasData) {
     return (
@@ -35,7 +35,7 @@ export default function LatencySparkline({
             className="text-2xl font-medium leading-none tabular-nums"
             style={{ color: "var(--accent)" }}
           >
-            {current} ms
+            {current?.toFixed(0)} ms
           </div>
           <Text color="subtle" className="mt-1 text-xs">
             current
