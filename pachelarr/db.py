@@ -151,6 +151,13 @@ _SCHEMA = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS cache_torbox (
+        key        TEXT PRIMARY KEY,
+        cached     INTEGER NOT NULL DEFAULT 1,
+        updated_at REAL NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS cache_tmdb_title (
         key      TEXT PRIMARY KEY,
         ids_json TEXT NOT NULL,
@@ -339,6 +346,34 @@ def load_magnet(max_entries: int) -> list:
             (max_entries,),
         ).fetchall()
     return [(r["key"], r["magnet"]) for r in rows]
+
+
+# --------------------------------------------------------------------------- #
+# Cache: torbox (known-cached infohashes)
+# --------------------------------------------------------------------------- #
+
+def upsert_torbox(key: str) -> None:
+    """Record an infohash as known-cached (write-through from _TORBOX_CACHE)."""
+    conn = _require_conn()
+    with _lock:
+        conn.execute(
+            "INSERT INTO cache_torbox (key, cached, updated_at) VALUES (?, 1, ?) "
+            "ON CONFLICT(key) DO UPDATE SET cached=excluded.cached, "
+            "updated_at=excluded.updated_at",
+            (key, time.time()),
+        )
+
+
+def load_torbox(max_entries: int) -> list:
+    """Return known-cached infohash keys ordered oldest-first so the caller's
+    ``move_to_end`` re-establishes recency on later access."""
+    conn = _require_conn()
+    with _lock:
+        rows = conn.execute(
+            "SELECT key FROM cache_torbox ORDER BY updated_at ASC LIMIT ?",
+            (max_entries,),
+        ).fetchall()
+    return [r["key"] for r in rows]
 
 
 # --------------------------------------------------------------------------- #
@@ -566,8 +601,19 @@ def load_caches_into_lru() -> None:
             key = tuple(_json.loads(key_str))
         except (TypeError, ValueError):
             continue
-        state._TMDB_TITLE_CACHE[key] = {"ids": ids, "expires": expires}
+        # The stored value is a dict either way; detect which shape it is
+        # (title->ID ids-dict entries vs ID->title title-string entries).
+        if isinstance(ids, dict) and "title" in ids:
+            state._TMDB_TITLE_CACHE[key] = {"title": ids["title"], "expires": expires}
+        else:
+            state._TMDB_TITLE_CACHE[key] = {"ids": ids, "expires": expires}
         state._TMDB_TITLE_CACHE.move_to_end(key)
+
+    # torbox known-cached infohash cache (no TTL; presence means cached).
+    max_torbox = settings.get_int("TORBOX_CACHE_MAX", 5000)
+    for key in load_torbox(max_torbox):
+        state._TORBOX_CACHE[key] = True
+        state._TORBOX_CACHE.move_to_end(key)
 
     # indexers cache: only one listing row; load if fresh.
     indexers = load_indexers(now)

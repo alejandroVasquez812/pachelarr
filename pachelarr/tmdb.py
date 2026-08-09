@@ -38,6 +38,15 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
         logger.debug("TMDB_API_KEY not configured, skipping title lookup. Set TMDB_API_KEY env var to enable ID-based search support.")  # noqa: E501
         return None
 
+    # Check the ID->title cache first for every id type present, returning the
+    # cached title immediately to avoid repeat TMDB API calls.
+    for id_type, id_value in (("imdbid", imdbid), ("tvdbid", tvdbid),
+                              ("rid", rid), ("tmdbid", tmdbid)):
+        cached = _id_title_cache_get(id_type, id_value, search_type)
+        if cached is not None:
+            logger.debug(f"ID->title lookup cache hit for {id_type}={id_value}: {cached!r}")
+            return cached
+
     try:
         if imdbid:
             url = f"https://api.themoviedb.org/3/find/tt{imdbid}?api_key={tmdb_api_key}&external_source=imdb_id"
@@ -51,9 +60,12 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
                         year = release_date.split('-')[0] if release_date else ''
                         if title and year:
                             logger.info(f"Successfully looked up movie via TMDB (IMDb): {title} ({year})")
-                            return f"{title} {year}"
+                            result = f"{title} {year}"
+                            _id_title_cache_put("imdbid", imdbid, search_type, result)
+                            return result
                         elif title:
                             logger.info(f"Successfully looked up movie via TMDB (IMDb): {title}")
+                            _id_title_cache_put("imdbid", imdbid, search_type, title)
                             return title
                     if data.get('tv_results') and len(data['tv_results']) > 0:
                         show = data['tv_results'][0]
@@ -62,9 +74,12 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
                         year = first_air.split('-')[0] if first_air else ''
                         if title and year:
                             logger.info(f"Successfully looked up TV show via TMDB (IMDb): {title} ({year})")
-                            return f"{title} {year}"
+                            result = f"{title} {year}"
+                            _id_title_cache_put("imdbid", imdbid, search_type, result)
+                            return result
                         elif title:
                             logger.info(f"Successfully looked up TV show via TMDB (IMDb): {title}")
+                            _id_title_cache_put("imdbid", imdbid, search_type, title)
                             return title
 
         if tvdbid:
@@ -79,9 +94,12 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
                         year = first_air.split('-')[0] if first_air else ''
                         if title and year:
                             logger.info(f"Successfully looked up TV show via TMDB (TVDB): {title} ({year})")
-                            return f"{title} {year}"
+                            result = f"{title} {year}"
+                            _id_title_cache_put("tvdbid", tvdbid, search_type, result)
+                            return result
                         elif title:
                             logger.info(f"Successfully looked up TV show via TMDB (TVDB): {title}")
+                            _id_title_cache_put("tvdbid", tvdbid, search_type, title)
                             return title
 
         if rid:
@@ -96,9 +114,12 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
                         year = first_air.split('-')[0] if first_air else ''
                         if title and year:
                             logger.info(f"Successfully looked up TV show via TMDB (TVRage): {title} ({year})")
-                            return f"{title} {year}"
+                            result = f"{title} {year}"
+                            _id_title_cache_put("rid", rid, search_type, result)
+                            return result
                         elif title:
                             logger.info(f"Successfully looked up TV show via TMDB (TVRage): {title}")
+                            _id_title_cache_put("rid", rid, search_type, title)
                             return title
 
         if tmdbid:
@@ -112,9 +133,12 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
                         year = release_date.split('-')[0] if release_date else ''
                         if title and year:
                             logger.info(f"Successfully looked up movie via TMDB (TMDB ID): {title} ({year})")
-                            return f"{title} {year}"
+                            result = f"{title} {year}"
+                            _id_title_cache_put("tmdbid", tmdbid, search_type, result)
+                            return result
                         elif title:
                             logger.info(f"Successfully looked up movie via TMDB (TMDB ID): {title}")
+                            _id_title_cache_put("tmdbid", tmdbid, search_type, title)
                             return title
             else:
                 url = f"https://api.themoviedb.org/3/tv/{tmdbid}?api_key={tmdb_api_key}"
@@ -126,9 +150,12 @@ async def lookup_title_from_id(session, imdbid=None, tmdbid=None, tvdbid=None, r
                         year = first_air.split('-')[0] if first_air else ''
                         if title and year:
                             logger.info(f"Successfully looked up TV show via TMDB (TMDB ID): {title} ({year})")
-                            return f"{title} {year}"
+                            result = f"{title} {year}"
+                            _id_title_cache_put("tmdbid", tmdbid, search_type, result)
+                            return result
                         elif title:
                             logger.info(f"Successfully looked up TV show via TMDB (TMDB ID): {title}")
+                            _id_title_cache_put("tmdbid", tmdbid, search_type, title)
                             return title
 
         logger.debug(f"Could not lookup title for imdbid={imdbid} tmdbid={tmdbid} tvdbid={tvdbid} rid={rid}")
@@ -239,6 +266,56 @@ def _tmdb_title_cache_get(key):
         return None
     state._TMDB_TITLE_CACHE.move_to_end(key)
     return entry.get('ids')
+
+
+def _id_title_cache_key(id_type, id_value, search_type):
+    """Build the namespaced ID->title cache key tuple.
+
+    Namespaced with the literal ``"id"`` prefix so it cannot collide with the
+    title->ID keys ``(stripped.lower(), year, search_type)`` in the same
+    ``_TMDB_TITLE_CACHE`` OrderedDict.
+    """
+    return ("id", id_type, str(id_value).lower(), search_type)
+
+
+def _id_title_cache_get(id_type, id_value, search_type):
+    """Return the cached title string for an ID lookup, or None on miss/expiry."""
+    if not id_value:
+        return None
+    key = _id_title_cache_key(id_type, id_value, search_type)
+    entry = state._TMDB_TITLE_CACHE.get(key)
+    if entry is None:
+        return None
+    if entry.get('expires', 0) <= time.time():
+        return None
+    state._TMDB_TITLE_CACHE.move_to_end(key)
+    return entry.get('title')
+
+
+def _id_title_cache_put(id_type, id_value, search_type, title):
+    """Cache a resolved ID->title string with LRU bound + SQLite write-through.
+
+    Stores a ``{'title': ..., 'expires': ...}`` value shape (different from the
+    ids-dict entries) in ``_TMDB_TITLE_CACHE``; ``load_caches_into_lru`` and
+    ``db.load_tmdb_title`` handle both shapes.
+    """
+    if not id_value or not title:
+        return
+    key = _id_title_cache_key(id_type, id_value, search_type)
+    ttl = settings.get_int("TMDB_TITLE_LOOKUP_CACHE_TTL", 300)
+    max_entries = settings.get_int("TMDB_TITLE_LOOKUP_CACHE_MAX", 5000)
+    expires = time.time() + ttl
+    state._TMDB_TITLE_CACHE[key] = {'title': title, 'expires': expires}
+    state._TMDB_TITLE_CACHE.move_to_end(key)
+    while len(state._TMDB_TITLE_CACHE) > max_entries:
+        try:
+            state._TMDB_TITLE_CACHE.popitem(last=False)
+        except KeyError:
+            break
+    try:
+        db.upsert_tmdb_title(_tmdb_key_to_str(key), {'title': title}, expires)
+    except Exception as e:
+        logger.debug(f"_id_title_cache_put: DB upsert failed for {key}: {e}", exc_info=True)
 
 
 def _tmdb_key_to_str(key):

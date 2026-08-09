@@ -54,7 +54,7 @@ def test_migrate_creates_all_tables(fresh_db):
     ).fetchall()
     names = {r["name"] for r in rows}
     for expected in ("settings", "cache_scrape", "cache_magnet",
-                     "cache_tmdb_title", "cache_indexers", "stats"):
+                     "cache_tmdb_title", "cache_torbox", "cache_indexers", "stats"):
         assert expected in names, f"missing table {expected}"
 
 
@@ -322,6 +322,77 @@ def test_load_caches_caps_magnet_at_max(fresh_db):
         assert len(state._MAGNET_CACHE) <= 3
     finally:
         settings.set_override("TRACKER_SCRAPE_CACHE_MAX", None)
+
+
+# --------------------------------------------------------------------------- #
+# Torbox cache (cache_torbox) + load_caches_into_lru
+# --------------------------------------------------------------------------- #
+
+def test_upsert_and_load_torbox_roundtrip(fresh_db):
+    db.upsert_torbox("abc123")
+    db.upsert_torbox("def456")
+    assert set(db.load_torbox(100)) == {"abc123", "def456"}
+
+
+def test_load_torbox_orders_oldest_first(fresh_db):
+    db.upsert_torbox("old")
+    db.upsert_torbox("new")
+    assert db.load_torbox(100) == ["old", "new"]
+
+
+def test_load_torbox_respects_limit(fresh_db):
+    db.upsert_torbox("a")
+    db.upsert_torbox("b")
+    db.upsert_torbox("c")
+    assert db.load_torbox(2) == ["a", "b"]
+
+
+def test_load_caches_populates_torbox_cache(fresh_db):
+    conn = db._conn
+    conn.execute(
+        "INSERT INTO cache_torbox (key, cached, updated_at) VALUES (?, 1, ?)",
+        ("h1", time.time()),
+    )
+    conn.execute(
+        "INSERT INTO cache_torbox (key, cached, updated_at) VALUES (?, 1, ?)",
+        ("h2", time.time()),
+    )
+    state._TORBOX_CACHE.clear()
+    db.load_caches_into_lru()
+    assert state._TORBOX_CACHE["h1"] is True
+    assert state._TORBOX_CACHE["h2"] is True
+
+
+def test_load_caches_caps_torbox_at_max(fresh_db):
+    conn = db._conn
+    for i in range(10):
+        conn.execute(
+            "INSERT INTO cache_torbox (key, cached, updated_at) VALUES (?, 1, ?)",
+            (f"k{i}", time.time() + i),
+        )
+    state._TORBOX_CACHE.clear()
+    settings.set_override("TORBOX_CACHE_MAX", 3)
+    try:
+        db.load_caches_into_lru()
+        assert len(state._TORBOX_CACHE) <= 3
+    finally:
+        settings.set_override("TORBOX_CACHE_MAX", None)
+
+
+def test_load_caches_handles_id_title_tmdb_shape(fresh_db):
+    """ID->title entries (title-string shape) survive the startup rebuild."""
+    import json
+    conn = db._conn
+    conn.execute(
+        "INSERT INTO cache_tmdb_title (key, ids_json, expires) VALUES (?, ?, ?)",
+        (json.dumps(("id", "imdbid", "1375666", "movie")),
+         json.dumps({"title": "Inception 2010"}), time.time() + 100),
+    )
+    state._TMDB_TITLE_CACHE.clear()
+    db.load_caches_into_lru()
+    entry = state._TMDB_TITLE_CACHE[("id", "imdbid", "1375666", "movie")]
+    assert entry["title"] == "Inception 2010"
+    assert "expires" in entry
 
 
 # --------------------------------------------------------------------------- #

@@ -108,10 +108,50 @@ async def check_torbox_cache(session, hashes):
                 logger.exception(f"Error processing Torbox chunk: {e}")
                 continue
         logger.info(f"Torbox cache check: total cached hits={total_hits}")
-        hits_n = len(combined)
-        state.torbox_hits += hits_n
-        state.torbox_misses += max(len(unique_hashes) - hits_n, 0)
         return combined
     except aiohttp.ClientError as e:
         logger.exception(f"Error checking Torbox cache: {e}")
         return {}
+
+
+def _torbox_cache_get_known(hashes):
+    """Return the subset of lowercased infohashes known-cached in _TORBOX_CACHE.
+
+    Read-only probe that moves hits to the LRU end (recency) but does not
+    consult Torbox. Misses are absent from the returned set.
+    """
+    known = set()
+    for h in hashes:
+        if not h:
+            continue
+        key = h.lower() if isinstance(h, str) else h
+        if state._TORBOX_CACHE.get(key) is not None:
+            known.add(key)
+            state._TORBOX_CACHE.move_to_end(key)
+    return known
+
+
+def _torbox_cache_put_many(hashes):
+    """Record infohashes as known-cached with LRU bound + SQLite write-through.
+
+    Only cached hits should be passed here; uncached hashes are NOT cached so
+    they get re-checked against Torbox on repeat searches. The cache has no
+    TTL (cached results are very unlikely to flip).
+    """
+    from pachelarr import db
+    for h in hashes:
+        if not h:
+            continue
+        key = h.lower() if isinstance(h, str) else h
+        state._TORBOX_CACHE[key] = True
+        state._TORBOX_CACHE.move_to_end(key)
+        max_torbox = state.torbox_cache_max()
+        while len(state._TORBOX_CACHE) > max_torbox:
+            try:
+                state._TORBOX_CACHE.popitem(last=False)
+            except KeyError:
+                break
+        try:
+            db.upsert_torbox(key)
+        except Exception as e:
+            logger.debug(f"_torbox_cache_put_many: DB upsert failed for {key}: {e}", exc_info=True)

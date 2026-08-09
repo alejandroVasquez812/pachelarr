@@ -12,7 +12,7 @@ import aiohttp
 from lxml import etree as ET
 
 import main as m
-from pachelarr import settings
+from pachelarr import settings, state, torbox
 from tests._fakes import FakeCtx
 from tests._torznab_helpers import build_rss, pair
 
@@ -115,6 +115,156 @@ async def test_check_torbox_cache_deduplication_order():
     out = await m.check_torbox_cache(session, input_hashes)
     assert session.last_payload == {"hashes": ["abc123"]}
     assert out == {"abc123": True}
+
+
+# ---------------------------------------------------------------------------
+# _torbox_cache_get_known / _torbox_cache_put_many + app.py integration
+# ---------------------------------------------------------------------------
+
+def test_torbox_cache_get_known_empty_when_absent():
+    from pachelarr import state
+    state._TORBOX_CACHE.clear()
+    assert torbox._torbox_cache_get_known(["abc", "def"]) == set()
+
+
+def test_torbox_cache_get_known_returns_subset_and_lowercases():
+    from pachelarr import state
+    state._TORBOX_CACHE.clear()
+    torbox._torbox_cache_put_many(["ABC123", "def456"])
+    known = torbox._torbox_cache_get_known(["ABC123", "zzz999"])
+    assert known == {"abc123"}
+    assert "def456" not in known
+
+
+def test_torbox_cache_put_many_stores_lowercased():
+    from pachelarr import state
+    state._TORBOX_CACHE.clear()
+    torbox._torbox_cache_put_many(["ABC123", "DEF456"])
+    assert state._TORBOX_CACHE["abc123"] is True
+    assert state._TORBOX_CACHE["def456"] is True
+
+
+def test_torbox_cache_put_many_evicts_beyond_max():
+    from pachelarr import settings, state
+    state._TORBOX_CACHE.clear()
+    settings.set_override("TORBOX_CACHE_MAX", 2)
+    try:
+        torbox._torbox_cache_put_many(["a", "b", "c", "d"])
+        assert len(state._TORBOX_CACHE) == 2
+        assert "a" not in state._TORBOX_CACHE
+        assert "d" in state._TORBOX_CACHE
+    finally:
+        settings.set_override("TORBOX_CACHE_MAX", None)
+
+
+def test_torbox_cache_put_many_writes_through_to_db():
+    from pachelarr import db
+    state._TORBOX_CACHE.clear()
+    db._conn.execute("DELETE FROM cache_torbox")
+    torbox._torbox_cache_put_many(["h1", "h2"])
+    rows = db.load_torbox(100)
+    assert set(rows) == {"h1", "h2"}
+
+
+async def test_handle_search_skips_torbox_api_for_known_cached(monkeypatch):
+    """A second search with the same hashes skips the Torbox API entirely."""
+    from pachelarr import state
+    from pachelarr import torbox as _torbox
+    state._TORBOX_CACHE.clear()
+
+    h = "abc123abc123abc123abc123abc123abc123abcd"
+    xml = build_rss([{"hash": h, "title": "CachedTitle", "seeders": 1,
+                      "trackers": ["http://t1/announce"]}])
+    pairs = [pair(1, xml)]
+
+    async def fake_search(session, kwargs):
+        return pairs
+
+    calls = {"n": 0}
+
+    async def fake_check(session, hashes):
+        calls["n"] += 1
+        return {h.lower(): True}
+
+    monkeypatch.setattr('main.search_prowlarr', fake_search)
+    monkeypatch.setattr('main.torbox.check_torbox_cache', fake_check)
+    # Seed the cache as if the first search confirmed it cached.
+    torbox._torbox_cache_put_many([h.lower()])
+
+    from starlette.datastructures import QueryParams
+    params = QueryParams({'q': 'Some Title', 't': 'movie'})
+    resp = await _hs(params)
+    decoded = resp.body.decode()
+    assert '[CACHED]' in decoded
+    # The Torbox API must NOT be called when all hashes are known-cached.
+    assert calls["n"] == 0, "Torbox API should be skipped for known-cached hashes"
+
+
+async def test_handle_search_rechecks_uncached_hashes(monkeypatch):
+    """Hashes not in _TORBOX_CACHE are still sent to the Torbox API."""
+    from pachelarr import state
+    state._TORBOX_CACHE.clear()
+
+    h = "abc123abc123abc123abc123abc123abc123abcd"
+    xml = build_rss([{"hash": h, "title": "UncachedTitle", "seeders": 1,
+                      "trackers": ["http://t1/announce"]}])
+    pairs = [pair(1, xml)]
+
+    async def fake_search(session, kwargs):
+        return pairs
+
+    called = {"hashes": None}
+
+    async def fake_check(session, hashes):
+        called["hashes"] = list(hashes)
+        return {h.lower(): True}
+
+    monkeypatch.setattr('main.search_prowlarr', fake_search)
+    monkeypatch.setattr('main.torbox.check_torbox_cache', fake_check)
+
+    from starlette.datastructures import QueryParams
+    params = QueryParams({'q': 'Some Title', 't': 'movie'})
+    resp = await _hs(params)
+    assert '[CACHED]' in resp.body.decode()
+    assert called["hashes"] == [h.lower()]
+
+
+async def test_handle_search_counts_all_hashes_in_global_counters(monkeypatch):
+    """Global torbox_hits/misses reflect known_cached + fresh hits, not just the
+    unknown subset checked against the Torbox API."""
+    from pachelarr import state
+    state._TORBOX_CACHE.clear()
+    state.torbox_hits = 0
+    state.torbox_misses = 0
+
+    h_known = "aaaa1111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    h_uncached = "bbbb2222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    xml = build_rss([
+        {"hash": h_known, "title": "KnownCached", "seeders": 1,
+         "trackers": ["http://t1/announce"]},
+        {"hash": h_uncached, "title": "Uncached", "seeders": 1,
+         "trackers": ["http://t2/announce"]},
+    ])
+    pairs = [pair(1, xml)]
+
+    async def fake_search(session, kwargs):
+        return pairs
+
+    async def fake_check(session, hashes):
+        # Only h_uncached is unknown; Torbox says it's cached too.
+        return {h_uncached.lower(): True}
+
+    monkeypatch.setattr('main.search_prowlarr', fake_search)
+    monkeypatch.setattr('main.torbox.check_torbox_cache', fake_check)
+    # Seed the cache so h_known is known-cached (skips the API).
+    torbox._torbox_cache_put_many([h_known.lower()])
+
+    from starlette.datastructures import QueryParams
+    params = QueryParams({'q': 'Some Title', 't': 'movie'})
+    await _hs(params)
+    # Both hashes ended up cached: hits=2, misses=0.
+    assert state.torbox_hits == 2, state.torbox_hits
+    assert state.torbox_misses == 0, state.torbox_misses
 
 
 # ---------------------------------------------------------------------------
