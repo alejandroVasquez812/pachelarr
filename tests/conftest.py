@@ -24,6 +24,7 @@ def _reset_state():
     state._TMDB_TITLE_CACHE.clear()
     state._MAGNET_CACHE.clear()
     state._INDEXERS_CACHE.clear()
+    state._TORBOX_CACHE.clear()
     state.torbox_hits = 0
     state.torbox_misses = 0
     state.last_search_latency_ms = None

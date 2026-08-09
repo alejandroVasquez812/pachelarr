@@ -380,7 +380,28 @@ async def _handle_search_impl(params, session):
     if not info_hashes:
         return Response(content=torznab.consolidate_and_emit_xml(prowlarr_results_xml, {}), media_type="application/xml")  # noqa: E501
 
-    cached_status = await torbox.check_torbox_cache(session, info_hashes)
+    # Normalize to lowercase (codebase convention) and split hashes into those
+    # already known-cached (skip the Torbox API call) vs those to re-check.
+    info_hashes = [h.lower() if isinstance(h, str) else h for h in info_hashes]
+    known_cached = torbox._torbox_cache_get_known(info_hashes)
+    unknown = [h for h in info_hashes if h not in known_cached]
+
+    if unknown:
+        fresh = await torbox.check_torbox_cache(session, unknown)
+        # Persist newly-confirmed cached hashes (misses are NOT cached so they
+        # are re-checked against Torbox on repeat searches).
+        torbox._torbox_cache_put_many(fresh.keys())
+    else:
+        fresh = {}
+
+    cached_status = {h: True for h in known_cached}
+    cached_status.update(fresh)
+
+    # Global counters must reflect ALL hashes (known_cached + fresh hits), not
+    # just the subset checked against Torbox this call. Unconditional, matching
+    # the prior behavior where check_torbox_cache always mutated these.
+    state.torbox_hits += len(cached_status)
+    state.torbox_misses += max(len(info_hashes) - len(cached_status), 0)
 
     uncached_seeders = {}
     if settings.get_bool("TRACKER_SCRAPE_ENABLED", False):

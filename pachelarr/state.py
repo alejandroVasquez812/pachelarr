@@ -130,9 +130,16 @@ _SCRAPE_CACHE = OrderedDict()
 _TMDB_TITLE_CACHE = OrderedDict()
 _MAGNET_CACHE = OrderedDict()
 _INDEXERS_CACHE = OrderedDict()
+_TORBOX_CACHE = OrderedDict()
 
 
 def magnet_cache_max() -> int:
     """Live magnet cache cap (defaults to TRACKER_SCRAPE_CACHE_MAX)."""
     from pachelarr import settings
     return settings.get_int("TRACKER_SCRAPE_CACHE_MAX", 5000)
+
+
+def torbox_cache_max() -> int:
+    """Live Torbox known-cached infohash cache cap (defaults to TORBOX_CACHE_MAX)."""
+    from pachelarr import settings
+    return settings.get_int("TORBOX_CACHE_MAX", 5000)
