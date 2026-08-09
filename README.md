@@ -14,11 +14,13 @@ Pachelarr sits between your media management tools (Radarr/Sonarr) and Prowlarr,
 ## The Problem It Solves
 
 ### 1. Debrid Service Integration
+
 **Problem:** Radarr/Sonarr can't check if torrents are cached before downloading, often grabbing uncached torrents that take hours to download to your debrid service.
 
 **Solution:** Pachelarr checks cache status in real-time and boosts cached torrents to the top of results. Your media manager will almost always pick instantly-available cached content.
 
 ### 2. ID-Only Search Failures
+
 **Problem:** When Radarr/Sonarr search by IMDb/TVDB ID alone (without text), public torrent indexers return wrong results because they don't support native ID-based searches.
 
 **Example:** Searching for "Elf (2003)" with IMDb ID `tt0319343` returns random movies like "Emperor's New Groove" and "Fraggle Rock."
@@ -26,6 +28,7 @@ Pachelarr sits between your media management tools (Radarr/Sonarr) and Prowlarr,
 **Solution:** Pachelarr automatically looks up the movie/TV title from the ID using TMDB API and adds it to the search, ensuring accurate results.
 
 ### 3. Poor Metadata Quality
+
 **Problem:** Many public indexers don't provide accurate seeder/leecher counts, making it hard to judge torrent health.
 
 **Solution:** Enable optional UDP tracker scraping to get real-time stats directly from trackers.
@@ -33,14 +36,17 @@ Pachelarr sits between your media management tools (Radarr/Sonarr) and Prowlarr,
 ## Compatibility
 
 ### Media Management (Clients)
+
 - ✅ **Radarr** (all versions)
 - ✅ **Sonarr** (all versions)
 - ✅ Any Torznab-compatible client
 
 ### Indexer Aggregators
+
 - ✅ **Prowlarr** (required)
 
 ### Debrid Services
+
 - ✅ **Torbox** (fully supported)
 - 🔄 **Real-Debrid, AllDebrid, Premiumize** (coming soon)
 
@@ -48,7 +54,7 @@ Pachelarr sits between your media management tools (Radarr/Sonarr) and Prowlarr,
 
 ## How It Works
 
-```
+```mermaid
 ┌─────────┐     ┌───────────┐     ┌──────────┐     ┌─────────┐
 │ Radarr/ │────▶│ Pachelarr │────▶│ Prowlarr │────▶│ Public  │
 │ Sonarr  │◀────│           │◀────│          │◀────│ Indexers│
@@ -70,6 +76,7 @@ Pachelarr sits between your media management tools (Radarr/Sonarr) and Prowlarr,
 ```
 
 **Request Flow:**
+
 1. Radarr/Sonarr sends search request to Pachelarr (configured as a Torznab indexer)
 2. If search contains only IDs, Pachelarr looks up the title via TMDB
 3. Pachelarr forwards enriched search to Prowlarr
@@ -83,11 +90,11 @@ Pachelarr sits between your media management tools (Radarr/Sonarr) and Prowlarr,
 ## Installation
 
 ### Prerequisites
+
 - Docker and Docker Compose
 - Prowlarr instance with configured indexers
 - Torbox account and API key
 - TMDB API key (free, required for ID-based searches)
-
 
 ### Using Docker Image Directly
 
@@ -202,6 +209,7 @@ services:
 </details>
 
 **For Docker Compose GUI users (Portainer, Dockge, etc.):**
+
 - Copy the compose content above
 - Paste it into your Docker Compose editor
 - Update the environment variables with your API keys
@@ -302,6 +310,7 @@ services:
 </details>
 
 **For Docker Compose GUI users (Portainer, Dockge, etc.):**
+
 - Copy the compose content above
 - Paste it into your Docker Compose editor
 - Update the environment variables with your API keys
@@ -312,14 +321,15 @@ git clone https://github.com/northernpowerhouse/pachelarr.git
 cd pachelarr
 ```
 
-3. **Get your API keys**
-   - **Torbox API Key:** https://torbox.app/settings (under API section)
+1. **Get your API keys**
+   - **Torbox API Key:** <https://torbox.app/settings> (under API section)
    - **Prowlarr API Key:** Prowlarr → Settings → General → API Key
-   - **TMDB API Key:** https://www.themoviedb.org/settings/api (free account required)
+   - **TMDB API Key:** <https://www.themoviedb.org/settings/api> (free account required)
 
-4. **Configure environment variables**
+2. **Configure environment variables**
 
 Edit `docker-compose.yml` and update these required values:
+
 ```yaml
 - PROWLARR_URL=http://your-prowlarr-host:9696
 - PROWLARR_API_KEY=your_prowlarr_api_key_here
@@ -328,17 +338,19 @@ Edit `docker-compose.yml` and update these required values:
 - PACHELARR_API_KEY=your_pachelarr_api_key_here  # Any random string
 ```
 
-5. **Start the service**
+1. **Start the service**
+
 ```bash
 docker compose up -d
 ```
 
-6. **Configure Radarr/Sonarr**
+1. **Configure Radarr/Sonarr**
 
 Add Pachelarr as a Torznab indexer:
+
 - **URL:** `http://pachelarr-host:6800/api`
 - **API Key:** Whatever you set for `PACHELARR_API_KEY`
-- **Categories:** 
+- **Categories:**
   - Movies: 2000,2010,2020,2030,2040,2045,2050,2060,2070,2080
   - TV: 5000,5010,5020,5030,5040,5045,5050,5060,5070,5080
 
@@ -351,7 +363,7 @@ All configuration is done via environment variables in `docker-compose.yml`.
 `PROWLARR_URL`, `PROWLARR_API_KEY`, and `TORBOX_API_KEY` are **required and validated at startup** (fail-fast): if any is missing or empty, the app logs a clear error naming all missing vars and aborts boot instead of failing later on the first search with a cryptic 500. `TMDB_API_KEY` and `PACHELARR_API_KEY` are optional.
 
 | Variable | Description | Example |
-|----------|-------------|---------|
+| ---------- | ------------- | --------- |
 | `PROWLARR_URL` | Prowlarr instance URL | `http://192.168.1.100:9696` |
 | `PROWLARR_API_KEY` | Prowlarr API key | `abc123...` |
 | `TORBOX_API_KEY` | Torbox API key | `xyz789...` |
@@ -361,29 +373,33 @@ All configuration is done via environment variables in `docker-compose.yml`.
 ### Optional Settings
 
 #### Pachelarr Settings
+
 | Variable | Default | Description |
-|----------|---------|-------------|
+| ---------- | --------- | ------------- |
 | `PACHELARR_PORT` | `8080` | Port to listen on |
 | `PACHELARR_LOG_LEVEL` | `INFO` | Log verbosity: DEBUG, INFO, WARNING, ERROR |
 | `PACHELARR_SEEDERS_BOOST` | `10000` | Seeders added to cached torrents |
 | `PACHELARR_TEST_FALLBACK_QUERY` | `""` | Fallback query for category-only searches (improves Sonarr "Test" button) |
 
 #### Prowlarr Settings
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PROWLARR_INDEXER_SEARCH_TIMEOUT` | `10.0` | Total timeout in seconds per per-indexer Torznab search GET (a hung indexer is dropped, not aborted) |
 
 #### Torbox Settings
+
 | Variable | Default | Description |
-|----------|---------|-------------|
+| ---------- | --------- | ------------- |
 | `TORBOX_CHECK_URL` | `https://api.torbox.app/v1/api/torrents/checkcached` | Torbox cache check endpoint |
 | `TORBOX_CHUNK_SIZE` | `100` | Hashes per API request (max: 100) |
 | `TORBOX_MAX_RETRIES` | `3` | Retry attempts on failure |
 | `TORBOX_RETRY_BACKOFF` | `0.5` | Seconds between retries |
 
 #### Tracker Scraping Settings
+
 | Variable | Default | Description |
-|----------|---------|-------------|
+| ---------- | --------- | ------------- |
 | `TRACKER_SCRAPE_ENABLED` | `false` | Enable UDP tracker scraping for real seeders/leechers |
 | `TRACKER_SCRAPE_CONCURRENCY` | `4` | Concurrent scrape requests |
 | `TRACKER_SCRAPE_TIMEOUT` | `5.0` | Timeout per scrape request (seconds) |
@@ -394,24 +410,30 @@ All configuration is done via environment variables in `docker-compose.yml`.
 ## Features
 
 ### 🚀 Cache-First Results
+
 Automatically prioritizes torrents that are already cached on your debrid service, giving you instant downloads instead of waiting hours for uncached content.
 
 ### 🎯 Smart ID Resolution
+
 Converts IMDb/TVDB/TMDB IDs to searchable titles using TMDB API, fixing broken ID-only searches that plague public indexers.
 
 **Supported ID types:**
+
 - IMDb IDs (movies & TV)
 - TVDB IDs (TV shows)
 - TMDB IDs (movies & TV)
 - TVRage IDs (TV shows, legacy)
 
 ### 📊 Real-Time Metadata
+
 Optional UDP tracker scraping provides accurate, real-time seeder and leecher counts directly from BitTorrent trackers.
 
 ### 🔄 Transparent Proxy
+
 Works seamlessly with Radarr/Sonarr - no modifications needed to existing workflows. Just add as a Torznab indexer.
 
 ### ⚡ Performance Optimized
+
 - Bulk hash checking (up to 100 hashes per API call)
 - Concurrent tracker scraping
 - Configurable timeouts and retry logic
@@ -420,6 +442,7 @@ Works seamlessly with Radarr/Sonarr - no modifications needed to existing workfl
 ## Usage Examples
 
 ### Typical Radarr Search
+
 1. User adds "Elf (2003)" to Radarr
 2. Radarr searches Pachelarr with `imdbid=0319343`
 3. Pachelarr looks up "Elf (2003)" from TMDB
@@ -431,7 +454,9 @@ Works seamlessly with Radarr/Sonarr - no modifications needed to existing workfl
 9. Radarr grabs cached torrent → instant download from Torbox
 
 ### Manual Testing
+
 Test the cache checking:
+
 ```bash
 curl "http://localhost:6800/api?t=movie&cat=2000&imdbid=0319343&apikey=your_api_key"
 ```
@@ -441,39 +466,47 @@ Look for `[CACHED]` prefix in results - these torrents are instantly available.
 ## Troubleshooting
 
 ### No cached results appearing
+
 - Verify `TORBOX_API_KEY` is correct
 - Check logs: `docker logs pachelarr-pachelarr-1`
 - Ensure torrents exist in Torbox cache (check Torbox directly)
 
 ### Wrong search results
+
 - Ensure `TMDB_API_KEY` is set and valid
 - Check logs for "Successfully looked up movie via TMDB"
 - Verify Prowlarr has working indexers
 
 ### Radarr/Sonarr can't connect
+
 - Confirm `PACHELARR_API_KEY` matches in both places
 - Check port 6800 is accessible
 - Verify container is running: `docker ps`
 
 ### Enable debug logging
+
 ```yaml
 - PACHELARR_LOG_LEVEL=DEBUG
 ```
+
 Then restart: `docker compose restart`
 
 ## Performance Considerations
 
 ### TMDB API Rate Limits
+
 - **Free tier:** 40 requests per 10 seconds
 - **Pachelarr usage:** 1 request per ID-only search
 - More than sufficient for typical Radarr/Sonarr usage
 
 ### Torbox API Limits
+
 - Check up to 100 hashes per request
 - Typical search checks 50-200 torrents (1-2 API calls)
 - No known rate limits for personal use
 
 ### Tracker Scraping
+
 - Adds 1-3 seconds latency per search when enabled
 - Recommended for users who need accurate seeder counts
 - Disable if speed is more important than metadata accuracy
@@ -489,15 +522,11 @@ Then restart: `docker compose restart`
 ## Contributing
 
 Contributions welcome! Areas for improvement:
+
 - Add support for Real-Debrid, AllDebrid, Premiumize
-- Implement proper caching layer (Redis/SQLite)
 - Add web UI for configuration and stats
 - Support for more ID types (Trakt, TVmaze, etc.)
 - Better error handling and retry logic
-
-## License
-
-[Add your license here]
 
 ## Credits
 
