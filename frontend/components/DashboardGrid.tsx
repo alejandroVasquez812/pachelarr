@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { Title } from "@/components/Title";
+import { Text } from "@/components/Text";
 import type { Healthz, SettingsSnapshot, Statsz, StatszIndexers } from "@/lib/types";
 import { fetchHealthClient, fetchStatsClient, fetchStatsIndexersClient } from "@/lib/client";
 import { RingBuffer } from "@/lib/history";
@@ -15,6 +16,18 @@ import IndexerTable from "@/components/IndexerTable";
 
 const POLL_INTERVAL_MS = 10_000;
 const MAX_LATENCY_SAMPLES = 60;
+
+function formatRelativeUpdated(ts: number): string {
+  const diffMs = Date.now() - ts;
+  const secs = Math.max(0, Math.floor(diffMs / 1000));
+  if (secs < 5) return "just now";
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
 
 export interface DashboardInitial {
   stats: Statsz;
@@ -73,9 +86,18 @@ export default function DashboardGrid({ initial }: { initial: DashboardInitial }
   const currentIndexers = indexers ?? initial.indexers;
   const currentHealth = healthError ? undefined : (health ?? initial.health);
 
+  // Prefer the last successful health check as the dashboard-level freshness
+  // timestamp; fall back to the last search at time reported by the backend.
+  const updatedTs = lastChecked ?? (currentStats.last_search_at ? currentStats.last_search_at * 1000 : null);
+
   return (
     <div className="space-y-6">
-      <Title>Pachelarr Dashboard</Title>
+      <div className="flex items-end justify-between gap-4">
+        <Title>Pachelarr Dashboard</Title>
+        <Text color="subtle" className="tabular-nums">
+          updated {updatedTs ? formatRelativeUpdated(updatedTs) : "—"}
+        </Text>
+      </div>
       {/* Tremor Raw has no Grid/Col components — use Tailwind grid utilities. */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <div className="md:col-span-2">

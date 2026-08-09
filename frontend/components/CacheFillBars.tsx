@@ -65,16 +65,15 @@ export default function CacheFillBars({
           return (
             <div key={row.label}>
               <div className="mb-1 flex items-center justify-between text-sm">
-                <span>{row.label}</span>
-                <span className="text-gray-500 dark:text-gray-500">
+                <span style={{ color: "var(--text)" }}>{row.label}</span>
+                <span
+                  className="tabular-nums"
+                  style={{ color: "var(--muted)" }}
+                >
                   {row.size} / {row.max}
                 </span>
               </div>
-              <ProgressBar
-                value={pct}
-                variant={variant}
-                label={`${row.size} of ${row.max} (${Math.round(pct)}%)`}
-              />
+              <ProgressBar value={pct} variant={variant} />
             </div>
           );
         })}
