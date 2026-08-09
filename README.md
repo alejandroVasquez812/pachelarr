@@ -519,12 +519,41 @@ Then restart: `docker compose restart`
 - Tracker scraping exposes your IP to public BitTorrent trackers
 - Use with VPN if privacy is a concern
 
+## Frontend Dashboard
+
+Pachelarr ships with an optional Next.js dashboard for live monitoring and configuration. It lives in `frontend/` and runs as a **separate container** alongside the backend (two images, one per runtime — see `frontend/README.md`).
+
+**What it shows:**
+
+- **Monitoring Dashboard** (`/dashboard`): backend health, Torbox cache hit/miss ratio, search-latency sparkline, cache fill-ratio bars (scrape/TMDB/magnet/indexers), indexer-list cache freshness, and a per-indexer analysis table.
+- **Configuration Interface** (`/settings`): edit all backend settings (Prowlarr, Torbox, Pachelarr, TMDB, tracker scraping, Prowlarr search/cache) grouped by category, with inline validation, dirty-state tracking, secret masking, an API-key generator for `PACHELARR_API_KEY`, and a restart-required banner. Changes apply live via the backend's `PUT /settings` (no restart for non-restart-required settings).
+
+**Run in development** (backend on `:6800`):
+
+```bash
+cd frontend
+npm install
+npm run dev   # serves on :3000, proxies /api/* to http://localhost:6800
+```
+
+**Run in production** (Docker): the `docker-compose.yml` already includes a `frontend` service. Set `PACHELARR_API_KEY` (and optionally `FRONTEND_PORT`) in a top-level `.env`, then:
+
+```bash
+docker compose up --build
+```
+
+The frontend reaches the backend over the docker network at `http://pachelarr:6800` (this port must match the backend's `PACHELARR_PORT`). `PACHELARR_API_KEY` lives only in the frontend container's server env — the browser never sees it.
+
+> **Per-indexer metrics:** the `/statsz/indexers` endpoint currently returns the real indexer list with all metrics zeroed (stub). The per-indexer table renders real names immediately; full latency + cached/uncached instrumentation is a follow-up.
+
+See `frontend/README.md` for full setup details.
+
 ## Contributing
 
 Contributions welcome! Areas for improvement:
 
 - Add support for Real-Debrid, AllDebrid, Premiumize
-- Add web UI for configuration and stats
+- Full per-indexer instrumentation (latency, cached/uncached per index)
 - Support for more ID types (Trakt, TVmaze, etc.)
 - Better error handling and retry logic
 
