@@ -42,6 +42,22 @@ export interface StatszIndexers {
   indexers: IndexerStat[];
 }
 
+// GET /statsz/searches
+export interface SearchRecord {
+  ts: number;
+  query: string | null;
+  search_type: string | null;
+  latency_ms: number | null;
+  torbox_cached: number | null;
+  torbox_uncached: number | null;
+  indexer_count: number | null;
+}
+
+export interface StatszSearches {
+  generated_at: number; // unix epoch seconds (float)
+  searches: SearchRecord[];
+}
+
 // GET /settings -> settings.snapshot()
 // type is "str" | "int" | "float" | "bool"
 export type SettingType = "str" | "int" | "float" | "bool";
@@ -135,6 +151,16 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       { key: "PROWLARR_INDEXERS_CACHE_MAX", label: "Indexers cache max" },
       { key: "PROWLARR_PARALLEL_INDEXER_CONCURRENCY", label: "Parallel indexer concurrency" },
       { key: "PROWLARR_INDEXER_SEARCH_TIMEOUT", label: "Indexer search timeout" },
+    ],
+  },
+  {
+    name: "Statistics",
+    keys: [
+      { key: "STATS_ENABLED", label: "Stats collection" },
+      { key: "STATS_GLOBAL_ENABLED", label: "Global stats" },
+      { key: "STATS_PER_INDEXER_ENABLED", label: "Per-indexer stats" },
+      { key: "STATS_PER_SEARCH_ENABLED", label: "Per-search stats" },
+      { key: "STATS_PER_SEARCH_MAX", label: "Per-search history cap" },
     ],
   },
 ];

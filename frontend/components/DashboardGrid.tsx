@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { Title } from "@/components/Title";
 import { Text } from "@/components/Text";
-import type { Healthz, SettingsSnapshot, Statsz, StatszIndexers } from "@/lib/types";
-import { fetchHealthClient, fetchStatsClient, fetchStatsIndexersClient } from "@/lib/client";
+import type { Healthz, SettingsSnapshot, Statsz, StatszIndexers, StatszSearches } from "@/lib/types";
+import { fetchHealthClient, fetchStatsClient, fetchStatsIndexersClient, fetchStatsSearchesClient } from "@/lib/client";
 import { RingBuffer } from "@/lib/history";
 import HealthCard from "@/components/HealthCard";
 import CacheFillBars from "@/components/CacheFillBars";
@@ -13,6 +13,7 @@ import TorboxRatioDonut from "@/components/TorboxRatioDonut";
 import LatencySparkline from "@/components/LatencySparkline";
 import IndexerCacheFreshness from "@/components/IndexerCacheFreshness";
 import IndexerTable from "@/components/IndexerTable";
+import SearchHistoryTable from "@/components/SearchHistoryTable";
 
 const POLL_INTERVAL_MS = 10_000;
 const MAX_LATENCY_SAMPLES = 60;
@@ -32,6 +33,7 @@ function formatRelativeUpdated(ts: number): string {
 export interface DashboardInitial {
   stats: Statsz;
   indexers: StatszIndexers;
+  searches: StatszSearches;
   health: Healthz;
   settings: SettingsSnapshot | null;
 }
@@ -46,6 +48,11 @@ export default function DashboardGrid({ initial }: { initial: DashboardInitial }
     "/api/statsz/indexers",
     fetchStatsIndexersClient,
     { refreshInterval: POLL_INTERVAL_MS, fallbackData: initial.indexers },
+  );
+  const { data: searches } = useSWR<StatszSearches>(
+    "/api/statsz/searches",
+    fetchStatsSearchesClient,
+    { refreshInterval: POLL_INTERVAL_MS, fallbackData: initial.searches },
   );
   const { data: health, error: healthError } = useSWR<Healthz>(
     "/api/healthz",
@@ -84,6 +91,7 @@ export default function DashboardGrid({ initial }: { initial: DashboardInitial }
 
   const currentStats = stats ?? initial.stats;
   const currentIndexers = indexers ?? initial.indexers;
+  const currentSearches = searches ?? initial.searches;
   const currentHealth = healthError ? undefined : (health ?? initial.health);
 
   // Prefer the last successful health check as the dashboard-level freshness
@@ -112,6 +120,9 @@ export default function DashboardGrid({ initial }: { initial: DashboardInitial }
         <CacheFillBars stats={currentStats} settings={initial.settings} />
         <div className="md:col-span-2">
           <IndexerTable indexers={currentIndexers.indexers} />
+        </div>
+        <div className="md:col-span-2">
+          <SearchHistoryTable searches={currentSearches.searches} />
         </div>
       </div>
     </div>

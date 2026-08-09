@@ -15,6 +15,7 @@ import type {
   Healthz,
   Statsz,
   StatszIndexers,
+  StatszSearches,
   SettingsSnapshot,
   PutSettingsSuccess,
   PutSettingsError,
@@ -78,6 +79,11 @@ export async function fetchStats(): Promise<Statsz> {
 // GET /statsz/indexers — unauthenticated
 export async function fetchStatsIndexers(): Promise<StatszIndexers> {
   return getJson<StatszIndexers>("/statsz/indexers");
+}
+
+// GET /statsz/searches — unauthenticated
+export async function fetchStatsSearches(): Promise<StatszSearches> {
+  return getJson<StatszSearches>("/statsz/searches");
 }
 
 // GET /settings — auth-gated (server-side only; key from server env)
