@@ -1,6 +1,6 @@
 import os
 
-from pachelarr import prowlarr, scrape, settings, state, tmdb, torbox, torznab  # noqa: F401
+from pachelarr import prowlarr, scrape, settings, state, tmdb, torbox, torznab, tvdb  # noqa: F401
 from pachelarr.app import (  # noqa: F401
     app,
     get_setting,
@@ -49,6 +49,7 @@ from pachelarr.state import (  # noqa: F401
     _TMDB_TITLE_CACHE,
     _TORZNAB_ID_PARAMS,
     _TORZNAB_NS,
+    _TVDB_TOKEN,
     FOREIGN_LANGUAGE_TAGS,
     last_search_at,
     last_search_latency_ms,

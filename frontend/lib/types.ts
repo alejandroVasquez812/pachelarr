@@ -135,6 +135,13 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     ],
   },
   {
+    name: "TVDB",
+    keys: [
+      { key: "TVDB_API_KEY", label: "API key" },
+      { key: "TVDB_API_PIN", label: "Subscriber PIN (optional)" },
+    ],
+  },
+  {
     name: "Tracker Scraping",
     keys: [
       { key: "TRACKER_SCRAPE_ENABLED", label: "Tracker scraping" },

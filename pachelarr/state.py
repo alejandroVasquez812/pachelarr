@@ -132,6 +132,10 @@ _MAGNET_CACHE = OrderedDict()
 _INDEXERS_CACHE = OrderedDict()
 _TORBOX_CACHE = OrderedDict()
 
+# TVDB v4 JWT token cache (in-memory only; re-acquired on restart).
+# Populated by pachelarr.tvdb._login; read by _ensure_token.
+_TVDB_TOKEN = {"token": None, "expires_at": 0.0}
+
 
 def magnet_cache_max() -> int:
     """Live magnet cache cap (defaults to TRACKER_SCRAPE_CACHE_MAX)."""

@@ -323,3 +323,128 @@ def test_handle_search_skips_lookup_when_no_query(monkeypatch):
     resp = _run(_hs(params))
     # empty feed is returned (no query, no identifier, categories present forwarded)
     assert resp.body is not None
+
+
+# ---------------------------------------------------------------------------
+# TVDB split: tvdbid from TVDB, tmdbid+imdbid from TMDB
+# ---------------------------------------------------------------------------
+
+import json as _json
+import time as _time
+import base64 as _base64
+
+
+def _make_tvdb_jwt(exp_delta=86400):
+    header = b'{"alg":"HS256","typ":"JWT"}'
+    payload = _json.dumps({"exp": int(_time.time()) + exp_delta}).encode()
+    b64 = lambda b: _base64.urlsafe_b64encode(b).decode().rstrip("=")
+    return f"{b64(header)}.{b64(payload)}.sig"
+
+
+class DualFakeSession:
+    """Fake session supporting both TVDB (POST login + GET with headers) and
+    TMDB (GET without headers). Records all URLs in order."""
+
+    def __init__(self, get_routes=None, post_routes=None):
+        self.get_routes = get_routes or []
+        self.post_routes = post_routes or []
+        self.urls = []
+        self.post_bodies = []
+
+    def get(self, url, headers=None, params=None, timeout=None):
+        self.urls.append(url)
+        for sub, status, data in self.get_routes:
+            if sub in url:
+                return FakeCtx(status, data)
+        return FakeCtx(200, {'results': []})
+
+    def post(self, url, json=None, timeout=None):
+        self.urls.append(url)
+        self.post_bodies.append(json)
+        for sub, status, data in self.post_routes:
+            if sub in url:
+                return FakeCtx(status, data)
+        return FakeCtx(200, {})
+
+
+def _enable_tvdb(monkeypatch):
+    settings.set_override("TVDB_API_KEY", "tvdb-test-key")
+    m._TVDB_TOKEN["token"] = None
+    m._TVDB_TOKEN["expires_at"] = 0.0
+
+
+def _disable_tvdb():
+    settings.set_override("TVDB_API_KEY", None)
+    m._TVDB_TOKEN["token"] = None
+    m._TVDB_TOKEN["expires_at"] = 0.0
+
+
+def test_tvsearch_tvdb_provides_tvdbid_tmdb_provides_tmdbid_imdbid(monkeypatch):
+    """TV title->ID: tvdbid from TVDB /search, tmdbid+imdbid from TMDB /search/tv."""
+    _enable_title_lookup(monkeypatch)
+    _enable_tvdb(monkeypatch)
+    token = _make_tvdb_jwt()
+    session = DualFakeSession(
+        get_routes=[
+            # TVDB search for tvdbid
+            ("/v4/search?", 200, {"data": [{"id": 81189, "name": "Breaking Bad"}]}),
+            # TMDB search for tmdbid
+            ("/search/tv", 200, {'results': [{'id': 1396, 'name': 'Breaking Bad'}]}),
+            # TMDB external_ids for imdbid
+            ("/tv/1396/external_ids", 200, {'imdb_id': 'tt0903747', 'tvdb_id': 99999}),
+        ],
+        post_routes=[("/login", 200, {"token": token})],
+    )
+    ids = _run(m.lookup_identifier_from_query(session, "Breaking Bad", search_type='tvsearch'))
+    # tvdbid from TVDB (81189), not from TMDB's external_ids (99999).
+    assert ids is not None
+    assert ids.get('tvdbid') == '81189', ids
+    # tmdbid and imdbid from TMDB.
+    assert ids.get('tmdbid') == '1396', ids
+    assert ids.get('imdbid') == '0903747', ids
+    _disable_tvdb()
+
+
+def test_tvsearch_tvdb_only_no_tmdb_key(monkeypatch):
+    """With only TVDB (no TMDB key), tvsearch resolves just tvdbid."""
+    settings.set_override("TMDB_API_KEY", "test-key")
+    settings.set_override("TMDB_TITLE_LOOKUP_ENABLED", True)
+    settings.set_override("TVDB_API_KEY", "tvdb-test-key")
+    # Override TMDB key to empty to simulate TMDB not configured.
+    settings.set_override("TMDB_API_KEY", "")
+    m._TVDB_TOKEN["token"] = None
+    m._TVDB_TOKEN["expires_at"] = 0.0
+    m._TMDB_TITLE_CACHE.clear()
+    token = _make_tvdb_jwt()
+    session = DualFakeSession(
+        get_routes=[
+            ("/v4/search?", 200, {"data": [{"id": 81189, "name": "Breaking Bad"}]}),
+            # TMDB routes (should NOT be hit since no TMDB key).
+            ("/search/tv", 200, {'results': [{'id': 1396}]}),
+        ],
+        post_routes=[("/login", 200, {"token": token})],
+    )
+    ids = _run(m.lookup_identifier_from_query(session, "Breaking Bad", search_type='tvsearch'))
+    assert ids is not None
+    assert ids == {'tvdbid': '81189'}, ids
+    # TMDB search should not have been called.
+    assert not any("/search/tv" in u for u in session.urls), session.urls
+    _disable_tvdb()
+    settings.set_override("TMDB_API_KEY", None)
+
+
+def test_tvsearch_tmdb_only_no_tvdb_key_still_works(monkeypatch):
+    """Without TVDB key, tvsearch falls back to TMDB-only (existing behavior)."""
+    _enable_title_lookup(monkeypatch)
+    _disable_tvdb()
+    session = DualFakeSession(
+        get_routes=[
+            ("/search/tv", 200, {'results': [{'id': 1396, 'name': 'Breaking Bad'}]}),
+            ("/tv/1396/external_ids", 200, {'imdb_id': 'tt0903747', 'tvdb_id': 81189}),
+        ],
+        post_routes=[("/login", 200, {"token": "WRONG"})],
+    )
+    ids = _run(m.lookup_identifier_from_query(session, "Breaking Bad", search_type='tvsearch'))
+    assert ids == {'tmdbid': '1396', 'imdbid': '0903747', 'tvdbid': '81189'}, ids
+    # TVDB login should NOT have been called.
+    assert not any("/login" in u for u in session.urls), session.urls

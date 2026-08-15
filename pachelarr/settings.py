@@ -59,6 +59,7 @@ _RESTART_REQUIRED = {"PACHELARR_DATA_DIR", "PACHELARR_LOG_LEVEL"}
 # authenticated settings API, same exposure as env today).
 _SECRETS = {
     "PROWLARR_API_KEY", "TORBOX_API_KEY", "PACHELARR_API_KEY", "TMDB_API_KEY",
+    "TVDB_API_KEY", "TVDB_API_PIN",
 }
 
 
@@ -96,6 +97,10 @@ SETTINGS = {
     "TMDB_TITLE_LOOKUP_ENABLED": Setting("TMDB_TITLE_LOOKUP_ENABLED", "bool", False, "TMDB_TITLE_LOOKUP_ENABLED"),
     "TMDB_TITLE_LOOKUP_CACHE_TTL": Setting("TMDB_TITLE_LOOKUP_CACHE_TTL", "int", 300, "TMDB_TITLE_LOOKUP_CACHE_TTL"),
     "TMDB_TITLE_LOOKUP_CACHE_MAX": Setting("TMDB_TITLE_LOOKUP_CACHE_MAX", "int", 5000, "TMDB_TITLE_LOOKUP_CACHE_MAX"),
+
+    # --- TVDB (TV show metadata; preferred over TMDB for TV when configured) ---
+    "TVDB_API_KEY": Setting("TVDB_API_KEY", "str", "", "TVDB_API_KEY", secret=True),
+    "TVDB_API_PIN": Setting("TVDB_API_PIN", "str", "", "TVDB_API_PIN", secret=True),
 
     # --- Tracker scraping ---
     "TRACKER_SCRAPE_ENABLED": Setting("TRACKER_SCRAPE_ENABLED", "bool", False, "TRACKER_SCRAPE_ENABLED"),
