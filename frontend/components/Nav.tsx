@@ -1,35 +1,56 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { RiMenuLine, RiCloseLine } from "@remixicon/react";
 import { ThemeToggle } from "./ThemeToggle";
 import { cx } from "@/lib/utils";
+import { SETTINGS_TABS, SETTINGS_GROUPS } from "@/lib/types";
 
-const navItems = [
+function useHash(): string {
+  const [hash, setHash] = useState("");
+  useEffect(() => {
+    const update = () => setHash(window.location.hash.slice(1));
+    update();
+    window.addEventListener("hashchange", update);
+    return () => window.removeEventListener("hashchange", update);
+  }, []);
+  return hash;
+}
+
+const topLevelNavItems = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/settings", label: "Settings" },
 ];
 
+interface NavLinkProps {
+  href: string;
+  label: string;
+  sub?: boolean;
+  active?: boolean;
+  onClick?: () => void;
+}
+
 function NavLink({
   href,
   label,
+  sub = false,
+  active: activeProp,
   onClick,
-}: {
-  href: string;
-  label: string;
-  onClick?: () => void;
-}) {
+}: NavLinkProps) {
   const pathname = usePathname();
-  const active = pathname === href;
+  const active = activeProp ?? pathname === href;
 
   return (
     <Link
       href={href}
       onClick={onClick}
       className={cx(
-        "block px-3 py-2 rounded-md text-sm transition-colors",
+        "block rounded-md text-sm transition-colors",
+        sub
+          ? "px-3 py-1.5 ml-2 border-l border-[var(--border)]"
+          : "px-3 py-2",
         "text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--text)]",
         active && "bg-[var(--surface)] text-[var(--text)]"
       )}
@@ -47,6 +68,44 @@ function Wordmark() {
   );
 }
 
+function SettingsSubNav({ onClick }: { onClick?: () => void }) {
+  const pathname = usePathname();
+  const onSettings = pathname === "/settings";
+  const hash = useHash();
+
+  return (
+    <div className="space-y-1 mt-1">
+      {SETTINGS_TABS.map((tab) => {
+        const tabHash = `tab-${tab.id}`;
+        const groupLinks = SETTINGS_GROUPS.filter((g) => g.tab === tab.id);
+        return (
+          <div key={tab.id}>
+            <NavLink
+              href={`/settings#${tabHash}`}
+              label={tab.label}
+              sub
+              active={onSettings && hash === tabHash}
+              onClick={onClick}
+            />
+            <div className="space-y-0.5 mt-0.5">
+              {groupLinks.map((group) => (
+                <NavLink
+                  key={group.name}
+                  href={`/settings#group-${group.name}`}
+                  label={group.name}
+                  sub
+                  active={onSettings && hash === `group-${group.name}`}
+                  onClick={onClick}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Nav() {
   const [open, setOpen] = useState(false);
 
@@ -57,9 +116,12 @@ function Nav() {
         <div className="px-4 py-5">
           <Wordmark />
         </div>
-        <nav className="flex-1 px-3 space-y-1">
-          {navItems.map((item) => (
-            <NavLink key={item.href} {...item} />
+        <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
+          {topLevelNavItems.map((item) => (
+            <div key={item.href}>
+              <NavLink href={item.href} label={item.label} />
+              {item.href === "/settings" && <SettingsSubNav />}
+            </div>
           ))}
         </nav>
         <div className="px-3 py-4 border-t border-[var(--border)]">
@@ -110,13 +172,18 @@ function Nav() {
             <RiCloseLine className="size-6" aria-hidden="true" />
           </button>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.href}
-              {...item}
-              onClick={() => setOpen(false)}
-            />
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+          {topLevelNavItems.map((item) => (
+            <div key={item.href}>
+              <NavLink
+                href={item.href}
+                label={item.label}
+                onClick={() => setOpen(false)}
+              />
+              {item.href === "/settings" && (
+                <SettingsSubNav onClick={() => setOpen(false)} />
+              )}
+            </div>
           ))}
         </nav>
         <div className="px-3 py-4 border-t border-[var(--border)]">

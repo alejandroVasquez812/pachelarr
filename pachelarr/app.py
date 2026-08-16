@@ -12,6 +12,26 @@ from pachelarr.prowlarr import _indexer_is_enabled
 
 logger = logging.getLogger("pachelarr")
 
+
+# Hosts that are clearly not real Prowlarr instances. Used to skip the eager
+# indexer preload during startup in tests / placeholder configurations.
+_PLACEHOLDER_HOSTS = frozenset({"x", "localhost"})
+
+
+def _is_placeholder_url(url: str) -> bool:
+    """Return True for URLs that point at obvious placeholder hosts."""
+    if not url:
+        return True
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).hostname
+        if not host:
+            return True
+        host = host.lower().split(".")[0]
+        return host in _PLACEHOLDER_HOSTS
+    except Exception:
+        return True
+
 # Stats flush interval (seconds). Kept as a constant, not a setting, to avoid
 # a loop where flushing a stats-interval setting triggers another flush.
 _STATS_FLUSH_INTERVAL = 30.0
@@ -56,6 +76,7 @@ async def lifespan(app):
     db.init()
     settings.seed_from_env_if_empty()
     db.load_caches_into_lru()
+    db.load_param_overrides_into_state()
 
     # Seed in-memory stats counters from the DB so they survive restarts.
     try:
@@ -92,6 +113,26 @@ async def lifespan(app):
     except (TypeError, ValueError):
         connector = aiohttp.TCPConnector()
     app.state.session = aiohttp.ClientSession(connector=connector)
+
+    # Eagerly load the Prowlarr indexer list so the first search request
+    # doesn't pay the fetch cost.  Skip obvious placeholder URLs (e.g. http://x)
+    # and cap the attempt with a short timeout so a bad/unresolvable URL doesn't
+    # block startup for the full DNS timeout.
+    _prowlarr_url = settings.get_str("PROWLARR_URL")
+    if not _prowlarr_url or _is_placeholder_url(_prowlarr_url):
+        logger.info(f"Skipping eager Prowlarr indexer load for placeholder URL: {_prowlarr_url}")
+    else:
+        try:
+            from pachelarr.prowlarr import get_prowlarr_indexers_cached
+            # Use a short-lived session with explicit timeouts for the startup fetch.
+            preload_connector = aiohttp.TCPConnector(limit=4, limit_per_host=2)
+            preload_timeout = aiohttp.ClientTimeout(total=5, connect=3)
+            async with aiohttp.ClientSession(
+                connector=preload_connector, timeout=preload_timeout
+            ) as preload_session:
+                await get_prowlarr_indexers_cached(preload_session)
+        except Exception as e:
+            logger.warning(f"Eager indexer load failed at startup: {e}", exc_info=True)
 
     # Start the stats flush background task.
     app.state.stats_flush_task = asyncio.create_task(_stats_flush_loop())
@@ -267,6 +308,111 @@ async def put_settings(request: Request):
         return Response(status_code=400, content=str({"applied": applied, "errors": errors}))
     result = {"applied": applied, "settings": settings.snapshot()}
     return result
+
+
+# --------------------------------------------------------------------------- #
+# Param overrides API (global + per-indexer Torznab query param overrides)
+# --------------------------------------------------------------------------- #
+
+@app.get("/overrides")
+async def get_overrides(request: Request):
+    err = _check_settings_auth(request)
+    if err is not None:
+        return err
+    return state.all_param_overrides()
+
+
+@app.put("/overrides")
+async def put_overrides(request: Request):
+    err = _check_settings_auth(request)
+    if err is not None:
+        return err
+    try:
+        body = await request.json()
+    except Exception:
+        return Response(status_code=400, content="invalid JSON body")
+    if not isinstance(body, dict):
+        return Response(status_code=400, content="expected a JSON object")
+    scope = body.get("scope")
+    params = body.get("params")
+    if not scope or not isinstance(scope, str):
+        return Response(status_code=400, content="missing or invalid 'scope'")
+    if not scope.startswith("global") and not scope.startswith("indexer:"):
+        return Response(status_code=400, content="scope must be 'global' or 'indexer:<id>'")
+    if params is None or not isinstance(params, dict):
+        return Response(status_code=400, content="missing or invalid 'params'")
+    state.set_param_overrides(scope, params)
+    return {"applied": scope, "overrides": state.all_param_overrides()}
+
+
+@app.delete("/overrides")
+async def delete_overrides(request: Request):
+    err = _check_settings_auth(request)
+    if err is not None:
+        return err
+    scope = request.query_params.get("scope")
+    if not scope:
+        return Response(status_code=400, content="missing 'scope' query parameter")
+    state.clear_param_overrides(scope)
+    return {"deleted": scope, "overrides": state.all_param_overrides()}
+
+
+# --------------------------------------------------------------------------- #
+# Cache invalidation API
+# --------------------------------------------------------------------------- #
+
+@app.post("/cache/indexers/invalidate")
+async def invalidate_indexers_cache(request: Request):
+    err = _check_settings_auth(request)
+    if err is not None:
+        return err
+    state.invalidate_indexers_cache()
+    return {"status": "ok", "message": "Indexer listing cache invalidated"}
+
+
+# --------------------------------------------------------------------------- #
+# Stats reset API
+# --------------------------------------------------------------------------- #
+
+@app.post("/statsz/reset")
+async def reset_all_stats(request: Request):
+    err = _check_settings_auth(request)
+    if err is not None:
+        return err
+    state.reset_indexer_stats()
+    state.reset_search_history()
+    return {"status": "ok", "message": "All stats reset"}
+
+
+@app.post("/statsz/reset/indexers")
+async def reset_indexer_stats_all(request: Request):
+    err = _check_settings_auth(request)
+    if err is not None:
+        return err
+    state.reset_indexer_stats()
+    return {"status": "ok", "message": "Per-indexer stats reset"}
+
+
+@app.post("/statsz/reset/indexers/{indexer_id}")
+async def reset_indexer_stats_one(indexer_id: str, request: Request):
+    err = _check_settings_auth(request)
+    if err is not None:
+        return err
+    try:
+        idx_id = int(indexer_id)
+    except ValueError:
+        return Response(status_code=400, content="indexer_id must be an integer")
+    state.reset_indexer_stats(idx_id)
+    return {"status": "ok", "message": f"Stats reset for indexer {idx_id}"}
+
+
+@app.post("/statsz/reset/searches")
+async def reset_search_history(request: Request):
+    err = _check_settings_auth(request)
+    if err is not None:
+        return err
+    state.reset_search_history()
+    return {"status": "ok", "message": "Search history reset"}
 
 
 # --------------------------------------------------------------------------- #

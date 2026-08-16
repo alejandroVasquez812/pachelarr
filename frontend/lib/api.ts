@@ -19,6 +19,10 @@ import type {
   SettingsSnapshot,
   PutSettingsSuccess,
   PutSettingsError,
+  ParamOverrides,
+  PutOverrideResponse,
+  DeleteOverrideResponse,
+  ActionResponse,
 } from "./types";
 
 const BACKEND_URL =
@@ -124,4 +128,132 @@ export async function putSettings(
 
 export interface ApiErrorWithJson extends ApiError {
   json?: PutSettingsError;
+}
+
+// --------------------------------------------------------------------------- //
+// Admin action helpers (server-side only; key from server env)
+// --------------------------------------------------------------------------- //
+
+// GET /overrides — auth-gated
+export async function fetchOverrides(): Promise<ParamOverrides> {
+  if (!API_KEY) {
+    throw new ApiError(401, "PACHELARR_API_KEY not configured on the frontend");
+  }
+  return getJson<ParamOverrides>("/overrides", { headers: authHeaders() });
+}
+
+// PUT /overrides body {scope, params} -> {applied, overrides}
+export async function putOverride(
+  scope: string,
+  params: Record<string, unknown>,
+): Promise<PutOverrideResponse> {
+  if (!API_KEY) {
+    throw new ApiError(401, "PACHELARR_API_KEY not configured on the frontend");
+  }
+  const res = await fetch(backendUrl("/overrides"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    cache: "no-store",
+    body: JSON.stringify({ scope, params }),
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await safeErrorBody(res));
+  }
+  return (await res.json()) as PutOverrideResponse;
+}
+
+// DELETE /overrides?scope=... -> {deleted, overrides}
+export async function deleteOverride(scope: string): Promise<DeleteOverrideResponse> {
+  if (!API_KEY) {
+    throw new ApiError(401, "PACHELARR_API_KEY not configured on the frontend");
+  }
+  const res = await fetch(backendUrl(`/overrides?scope=${encodeURIComponent(scope)}`), {
+    method: "DELETE",
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await safeErrorBody(res));
+  }
+  return (await res.json()) as DeleteOverrideResponse;
+}
+
+// POST /cache/indexers/invalidate
+export async function invalidateIndexersCache(): Promise<ActionResponse> {
+  if (!API_KEY) {
+    throw new ApiError(401, "PACHELARR_API_KEY not configured on the frontend");
+  }
+  const res = await fetch(backendUrl("/cache/indexers/invalidate"), {
+    method: "POST",
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await safeErrorBody(res));
+  }
+  return (await res.json()) as ActionResponse;
+}
+
+// POST /statsz/reset — reset all stats (indexer + search history)
+export async function resetAllStats(): Promise<ActionResponse> {
+  if (!API_KEY) {
+    throw new ApiError(401, "PACHELARR_API_KEY not configured on the frontend");
+  }
+  const res = await fetch(backendUrl("/statsz/reset"), {
+    method: "POST",
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await safeErrorBody(res));
+  }
+  return (await res.json()) as ActionResponse;
+}
+
+// POST /statsz/reset/indexers — reset all per-indexer stats
+export async function resetIndexerStatsAll(): Promise<ActionResponse> {
+  if (!API_KEY) {
+    throw new ApiError(401, "PACHELARR_API_KEY not configured on the frontend");
+  }
+  const res = await fetch(backendUrl("/statsz/reset/indexers"), {
+    method: "POST",
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await safeErrorBody(res));
+  }
+  return (await res.json()) as ActionResponse;
+}
+
+// POST /statsz/reset/indexers/{id} — reset one indexer's stats
+export async function resetIndexerStatsOne(indexerId: number): Promise<ActionResponse> {
+  if (!API_KEY) {
+    throw new ApiError(401, "PACHELARR_API_KEY not configured on the frontend");
+  }
+  const res = await fetch(backendUrl(`/statsz/reset/indexers/${indexerId}`), {
+    method: "POST",
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await safeErrorBody(res));
+  }
+  return (await res.json()) as ActionResponse;
+}
+
+// POST /statsz/reset/searches — clear search history
+export async function resetSearchHistory(): Promise<ActionResponse> {
+  if (!API_KEY) {
+    throw new ApiError(401, "PACHELARR_API_KEY not configured on the frontend");
+  }
+  const res = await fetch(backendUrl("/statsz/reset/searches"), {
+    method: "POST",
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, await safeErrorBody(res));
+  }
+  return (await res.json()) as ActionResponse;
 }

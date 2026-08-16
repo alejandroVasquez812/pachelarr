@@ -92,13 +92,47 @@ export interface SettingsGroupKey {
 
 export interface SettingsGroup {
   name: string;
+  tab?: string;
   keys: SettingsGroupKey[];
 }
+
+export interface SettingsTabConfig {
+  id: string;
+  label: string;
+  groupNames: string[];
+}
+
+// Tabs each collect one or more settings groups for high-level navigation.
+export const SETTINGS_TABS: SettingsTabConfig[] = [
+  {
+    id: "connection",
+    label: "Connection",
+    groupNames: ["Prowlarr Connection", "Torbox"],
+  },
+  {
+    id: "app",
+    label: "App",
+    groupNames: ["Pachelarr", "Statistics"],
+  },
+  {
+    id: "metadata",
+    label: "Metadata",
+    groupNames: ["TMDB", "TVDB"],
+  },
+  {
+    id: "search",
+    label: "Search & Cache",
+    groupNames: ["Tracker Scraping", "Prowlarr Search / Cache"],
+  },
+];
+
+export const SETTINGS_TAB_ID_DEFAULT = "connection";
 
 // Settings grouping (mirrors pachelarr/settings.py SETTINGS registry order)
 export const SETTINGS_GROUPS: SettingsGroup[] = [
   {
     name: "Prowlarr Connection",
+    tab: "connection",
     keys: [
       { key: "PROWLARR_URL", label: "Prowlarr URL" },
       { key: "PROWLARR_API_KEY", label: "API key" },
@@ -106,6 +140,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   },
   {
     name: "Torbox",
+    tab: "connection",
     keys: [
       { key: "TORBOX_API_KEY", label: "API key" },
       { key: "TORBOX_CHECK_URL", label: "Cache check URL" },
@@ -117,6 +152,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   },
   {
     name: "Pachelarr",
+    tab: "app",
     keys: [
       { key: "PACHELARR_API_KEY", label: "API key" },
       { key: "PACHELARR_SEEDERS_BOOST", label: "Seeders boost" },
@@ -127,6 +163,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   },
   {
     name: "TMDB",
+    tab: "metadata",
     keys: [
       { key: "TMDB_API_KEY", label: "API key" },
       { key: "TMDB_TITLE_LOOKUP_ENABLED", label: "Title lookup enabled" },
@@ -136,6 +173,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   },
   {
     name: "TVDB",
+    tab: "metadata",
     keys: [
       { key: "TVDB_API_KEY", label: "API key" },
       { key: "TVDB_API_PIN", label: "Subscriber PIN (optional)" },
@@ -143,6 +181,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   },
   {
     name: "Tracker Scraping",
+    tab: "search",
     keys: [
       { key: "TRACKER_SCRAPE_ENABLED", label: "Tracker scraping" },
       { key: "TRACKER_SCRAPE_CONCURRENCY", label: "Concurrency" },
@@ -154,6 +193,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   },
   {
     name: "Prowlarr Search / Cache",
+    tab: "search",
     keys: [
       { key: "PROWLARR_INDEXERS_CACHE_TTL", label: "Indexers cache TTL" },
       { key: "PROWLARR_INDEXERS_CACHE_MAX", label: "Indexers cache max" },
@@ -163,6 +203,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   },
   {
     name: "Statistics",
+    tab: "app",
     keys: [
       { key: "STATS_ENABLED", label: "Stats collection" },
       { key: "STATS_GLOBAL_ENABLED", label: "Global stats" },
@@ -183,3 +224,30 @@ export const CACHE_MAX_KEYS = {
   magnet: "TRACKER_SCRAPE_CACHE_MAX", // magnet cache cap defaults to TRACKER_SCRAPE_CACHE_MAX
   indexers: "PROWLARR_INDEXERS_CACHE_MAX",
 } as const;
+
+// --------------------------------------------------------------------------- //
+// Admin action types (param overrides, cache invalidation, stats reset)
+// --------------------------------------------------------------------------- //
+
+// Param overrides: {scope: params_dict, ...} where scope = "global" or "indexer:<id>"
+export type ParamOverrides = Record<string, Record<string, unknown>>;
+
+export interface PutOverrideBody {
+  scope: string;
+  params: Record<string, unknown>;
+}
+
+export interface PutOverrideResponse {
+  applied: string;
+  overrides: ParamOverrides;
+}
+
+export interface DeleteOverrideResponse {
+  deleted: string;
+  overrides: ParamOverrides;
+}
+
+export interface ActionResponse {
+  status: "ok";
+  message: string;
+}

@@ -7,10 +7,9 @@ import { Text } from "@/components/Text";
 import type { Healthz, SettingsSnapshot, Statsz, StatszIndexers, StatszSearches } from "@/lib/types";
 import { fetchHealthClient, fetchStatsClient, fetchStatsIndexersClient, fetchStatsSearchesClient } from "@/lib/client";
 import { RingBuffer } from "@/lib/history";
-import HealthCard from "@/components/HealthCard";
+import HealthLatencyCard from "@/components/HealthLatencyCard";
 import CacheFillBars from "@/components/CacheFillBars";
 import TorboxRatioDonut from "@/components/TorboxRatioDonut";
-import LatencySparkline from "@/components/LatencySparkline";
 import IndexerCacheFreshness from "@/components/IndexerCacheFreshness";
 import IndexerTable from "@/components/IndexerTable";
 import SearchHistoryTable from "@/components/SearchHistoryTable";
@@ -40,7 +39,7 @@ export interface DashboardInitial {
 
 export default function DashboardGrid({ initial }: { initial: DashboardInitial }) {
   // Unauthenticated endpoints polled from the browser via SWR.
-  const { data: stats } = useSWR<Statsz>("/api/statsz", fetchStatsClient, {
+  const { data: stats, mutate: mutateStats } = useSWR<Statsz>("/api/statsz", fetchStatsClient, {
     refreshInterval: POLL_INTERVAL_MS,
     fallbackData: initial.stats,
   });
@@ -109,14 +108,20 @@ export default function DashboardGrid({ initial }: { initial: DashboardInitial }
       {/* Tremor Raw has no Grid/Col components — use Tailwind grid utilities. */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <div className="md:col-span-2">
-          <IndexerCacheFreshness ageSeconds={currentStats.indexers_cache.age_seconds} />
+          <IndexerCacheFreshness
+            ageSeconds={currentStats.indexers_cache.age_seconds}
+            onInvalidated={() => mutateStats()}
+          />
         </div>
-        <HealthCard health={currentHealth} lastChecked={lastChecked} />
+        <HealthLatencyCard
+          health={currentHealth}
+          lastChecked={lastChecked}
+          samples={samples}
+        />
         <TorboxRatioDonut
           hits={currentStats.torbox_hits}
           misses={currentStats.torbox_misses}
         />
-        <LatencySparkline samples={samples} />
         <CacheFillBars stats={currentStats} settings={initial.settings} />
         <div className="md:col-span-2">
           <IndexerTable indexers={currentIndexers.indexers} />

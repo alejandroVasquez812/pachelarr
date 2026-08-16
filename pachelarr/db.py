@@ -207,6 +207,13 @@ _SCHEMA = [
         indexer_count    INTEGER
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS param_overrides (
+        scope        TEXT PRIMARY KEY,
+        params_json  TEXT NOT NULL,
+        updated_at   REAL NOT NULL
+    )
+    """,
 ]
 
 
@@ -560,6 +567,100 @@ def load_searches(limit: int) -> list:
         }
         for r in rows
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Param overrides (global + per-indexer Torznab query param overrides)
+# --------------------------------------------------------------------------- #
+
+def upsert_param_overrides(scope: str, params: dict) -> None:
+    """Upsert one param-overrides row (scope = "global" or "indexer:<id>")."""
+    conn = _require_conn()
+    with _lock:
+        conn.execute(
+            "INSERT INTO param_overrides (scope, params_json, updated_at) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(scope) DO UPDATE SET params_json = excluded.params_json, "
+            "updated_at = excluded.updated_at",
+            (scope, json.dumps(params), time.time()),
+        )
+
+
+def get_param_overrides(scope: str) -> Optional[dict]:
+    """Return the params dict for one scope, or None if absent."""
+    conn = _require_conn()
+    with _lock:
+        row = conn.execute(
+            "SELECT params_json FROM param_overrides WHERE scope = ?", (scope,)
+        ).fetchone()
+    if row is None:
+        return None
+    try:
+        return json.loads(row["params_json"])
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def get_all_param_overrides() -> dict:
+    """Return all overrides as ``{scope: params_dict}``."""
+    conn = _require_conn()
+    with _lock:
+        rows = conn.execute(
+            "SELECT scope, params_json FROM param_overrides"
+        ).fetchall()
+    out = {}
+    for r in rows:
+        try:
+            out[r["scope"]] = json.loads(r["params_json"])
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return out
+
+
+def delete_param_overrides(scope: str) -> None:
+    """Delete one param-overrides row by scope."""
+    conn = _require_conn()
+    with _lock:
+        conn.execute("DELETE FROM param_overrides WHERE scope = ?", (scope,))
+
+
+def load_param_overrides_into_state() -> None:
+    """Rebuild the in-memory ``state._PARAM_OVERRIDES`` dict from SQLite.
+
+    Called from the FastAPI lifespan after ``load_caches_into_lru``.
+    """
+    from pachelarr import state
+    state._PARAM_OVERRIDES = get_all_param_overrides()
+
+
+# --------------------------------------------------------------------------- #
+# Cache / stats deletion helpers
+# --------------------------------------------------------------------------- #
+
+def delete_indexers_cache_row() -> None:
+    """Delete the single cached indexer listing row (cache_indexers)."""
+    conn = _require_conn()
+    with _lock:
+        conn.execute("DELETE FROM cache_indexers WHERE id = 1")
+
+
+def delete_indexer_stats(indexer_id=None) -> None:
+    """Delete all per-indexer stats rows, or one if ``indexer_id`` is given."""
+    conn = _require_conn()
+    with _lock:
+        if indexer_id is not None:
+            conn.execute(
+                "DELETE FROM stats_indexers WHERE indexer_id = ?", (int(indexer_id),)
+            )
+        else:
+            conn.execute("DELETE FROM stats_indexers")
+
+
+def delete_searches() -> None:
+    """Delete all search history rows."""
+    conn = _require_conn()
+    with _lock:
+        conn.execute("DELETE FROM stats_searches")
 
 
 # --------------------------------------------------------------------------- #

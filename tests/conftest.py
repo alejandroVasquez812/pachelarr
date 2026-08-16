@@ -31,6 +31,7 @@ def _reset_state():
     state.last_search_at = None
     state._INDEXER_STATS.clear()
     state._SEARCH_HISTORY.clear()
+    state._PARAM_OVERRIDES.clear()
     settings.clear_overrides()
 
 

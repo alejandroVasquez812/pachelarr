@@ -6,11 +6,14 @@ import { useToast } from "@/lib/useToast";
 import type {
   SettingsSnapshot,
   PutSettingsError,
+  SettingsGroup,
 } from "@/lib/types";
-import { SETTINGS_GROUPS, REQUIRED_SECRETS } from "@/lib/types";
+import { SETTINGS_GROUPS, SETTINGS_TABS, SETTINGS_TAB_ID_DEFAULT, REQUIRED_SECRETS } from "@/lib/types";
 import { coerceValue } from "@/lib/validate";
 import SettingsGroupCard from "./SettingsGroupCard";
 import RestartRequiredBanner from "./RestartRequiredBanner";
+import SettingsTabs from "./SettingsTabs";
+import SettingsSearch from "./SettingsSearch";
 
 interface SettingsClientProps {
   initial: SettingsSnapshot;
@@ -22,6 +25,38 @@ export default function SettingsClient({ initial }: SettingsClientProps) {
   const [draft, setDraft] = useState<SettingsSnapshot>(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [savingGroup, setSavingGroup] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string>(SETTINGS_TAB_ID_DEFAULT);
+  const [query, setQuery] = useState<string>("");
+
+  const normalizedQuery = query.trim().toLowerCase();
+
+  const filteredGroups: SettingsGroup[] = useMemo(() => {
+    return SETTINGS_GROUPS.map((group) => {
+      const matchingKeys = group.keys.filter((k) => {
+        const entry = draft[k.key];
+        if (!entry) return false;
+        if (!normalizedQuery) return true;
+        const haystack = `${group.name.toLowerCase()} ${k.key.toLowerCase()} ${k.label.toLowerCase()} ${String(entry.value ?? "").toLowerCase()}`;
+        return haystack.includes(normalizedQuery);
+      });
+      return { ...group, keys: matchingKeys };
+    }).filter((group) => group.keys.length > 0);
+  }, [draft, normalizedQuery]);
+
+  const visibleGroups: SettingsGroup[] = useMemo(() => {
+    if (normalizedQuery) return filteredGroups;
+    return filteredGroups.filter((group) => group.tab === activeTab);
+  }, [filteredGroups, activeTab, normalizedQuery]);
+
+  const resultCount = useMemo(
+    () => filteredGroups.reduce((sum, g) => sum + g.keys.length, 0),
+    [filteredGroups]
+  );
+
+  const activeTabHasGroups = useMemo(
+    () => filteredGroups.some((g) => g.tab === activeTab),
+    [filteredGroups, activeTab]
+  );
 
   const dirtyKeys = useMemo(() => {
     const set = new Set<string>();
@@ -147,7 +182,7 @@ export default function SettingsClient({ initial }: SettingsClientProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-50">
           Settings
         </h1>
@@ -162,19 +197,44 @@ export default function SettingsClient({ initial }: SettingsClientProps) {
 
       <RestartRequiredBanner snapshot={snapshot} draft={draft} />
 
-      {SETTINGS_GROUPS.map((group) => (
-        <SettingsGroupCard
-          key={group.name}
-          groupName={group.name}
-          entries={group.keys
-            .filter((k) => draft[k.key])
-            .map((k) => ({ keyDef: k, entry: draft[k.key] }))}
-          dirtyKeys={dirtyKeys}
-          errors={errors}
-          onFieldChange={handleFieldChange}
-          onSaveGroup={() => handleSaveGroup(group.name)}
-          isSaving={savingGroup === group.name}
-        />
+      <SettingsSearch value={query} onChange={setQuery} resultCount={resultCount} />
+
+      <SettingsTabs
+        tabs={SETTINGS_TABS}
+        activeTab={normalizedQuery ? "" : activeTab}
+        onChange={(tabId) => {
+          setActiveTab(tabId);
+          setQuery("");
+          if (typeof window !== "undefined") {
+            window.location.hash = `tab-${tabId}`;
+          }
+        }}
+      />
+
+      {visibleGroups.length === 0 && (
+        <p className="text-sm text-[var(--muted)]">
+          {normalizedQuery
+            ? "No settings match your search."
+            : activeTabHasGroups
+              ? "All settings in this tab are hidden by the current search."
+              : "No settings are available for this section."}
+        </p>
+      )}
+
+      {visibleGroups.map((group) => (
+        <div key={group.name} id={`group-${group.name}`}>
+          <SettingsGroupCard
+            groupName={group.name}
+            entries={group.keys
+              .filter((k) => draft[k.key])
+              .map((k) => ({ keyDef: k, entry: draft[k.key] }))}
+            dirtyKeys={dirtyKeys}
+            errors={errors}
+            onFieldChange={handleFieldChange}
+            onSaveGroup={() => handleSaveGroup(group.name)}
+            isSaving={savingGroup === group.name}
+          />
+        </div>
       ))}
     </div>
   );

@@ -211,6 +211,16 @@ def build_per_indexer_params(indexer, search_kwargs):
             params['limit'] = search_kwargs['limit']
     if search_kwargs.get('offset'):
         params['offset'] = search_kwargs['offset']
+
+    # Apply user-configured param overrides (global + per-indexer).
+    # Per-indexer overrides win over global; both win over computed params.
+    overrides = state.get_param_overrides(idx_id)
+    if overrides:
+        params.update(overrides)
+        logger.debug(
+            f"build_per_indexer_params: applied param overrides to indexer {idx_id}: {overrides}"  # noqa: E501
+        )
+
     return params
 
 

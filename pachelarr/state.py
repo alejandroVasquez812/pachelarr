@@ -90,6 +90,88 @@ def record_search(record):
     except Exception as e:  # noqa: BLE001
         logger.debug(f"record_search DB write failed: {e}", exc_info=True)
 
+
+# --------------------------------------------------------------------------- #
+# Param overrides (global + per-indexer Torznab query param overrides)
+# --------------------------------------------------------------------------- #
+
+# Dict keyed by scope: "global" or "indexer:<id>". Each value is a params dict.
+# Rebuilt from SQLite on startup via db.load_param_overrides_into_state().
+_PARAM_OVERRIDES = {}
+
+
+def get_param_overrides(indexer_id=None) -> dict:
+    """Return merged param overrides for a given indexer.
+
+    Global overrides are applied first as defaults; per-indexer overrides
+    (when ``indexer_id`` is provided) take precedence. Returns a new dict so
+    callers can safely mutate it.
+    """
+    merged = {}
+    global_params = _PARAM_OVERRIDES.get("global")
+    if global_params:
+        merged.update(global_params)
+    if indexer_id is not None:
+        per_indexer = _PARAM_OVERRIDES.get(f"indexer:{indexer_id}")
+        if per_indexer:
+            merged.update(per_indexer)
+    return merged
+
+
+def set_param_overrides(scope: str, params: dict) -> None:
+    """Store param overrides for a scope in-memory and write-through to SQLite."""
+    if not params:
+        _PARAM_OVERRIDES.pop(scope, None)
+        from pachelarr import db
+        db.delete_param_overrides(scope)
+        return
+    _PARAM_OVERRIDES[scope] = dict(params)
+    from pachelarr import db
+    db.upsert_param_overrides(scope, params)
+
+
+def clear_param_overrides(scope: str) -> None:
+    """Remove param overrides for a scope from memory and SQLite."""
+    _PARAM_OVERRIDES.pop(scope, None)
+    from pachelarr import db
+    db.delete_param_overrides(scope)
+
+
+def all_param_overrides() -> dict:
+    """Return a snapshot of all param overrides (for the REST GET endpoint)."""
+    return {scope: dict(params) for scope, params in _PARAM_OVERRIDES.items()}
+
+
+# --------------------------------------------------------------------------- #
+# Cache invalidation + stats reset helpers
+# --------------------------------------------------------------------------- #
+
+def invalidate_indexers_cache() -> None:
+    """Clear the in-memory indexer listing cache and the SQLite cache row."""
+    _INDEXERS_CACHE.clear()
+    from pachelarr import db
+    db.delete_indexers_cache_row()
+    logger.info("Indexer listing cache invalidated")
+
+
+def reset_indexer_stats(indexer_id=None) -> None:
+    """Reset per-indexer stats — all, or one indexer if ``indexer_id`` is given."""
+    if indexer_id is not None:
+        _INDEXER_STATS.pop(indexer_id, None)
+    else:
+        _INDEXER_STATS.clear()
+    from pachelarr import db
+    db.delete_indexer_stats(indexer_id)
+    logger.info(f"Per-indexer stats reset (indexer_id={indexer_id})")
+
+
+def reset_search_history() -> None:
+    """Clear in-memory search history and the SQLite search rows."""
+    _SEARCH_HISTORY.clear()
+    from pachelarr import db
+    db.delete_searches()
+    logger.info("Search history reset")
+
 # --------------------------------------------------------------------------- #
 # Constant mappings (not settings)
 # --------------------------------------------------------------------------- #
