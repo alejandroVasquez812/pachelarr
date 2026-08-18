@@ -8,13 +8,9 @@ import { Text } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { useToast } from "@/lib/useToast";
 import {
-  Table,
-  TableHead,
-  TableHeaderCell,
-  TableBody,
-  TableRow,
-  TableCell,
-} from "@/components/Table";
+  DataTable,
+  type DataTableColumn,
+} from "@/components/DataTable";
 import type { IndexerStat } from "@/lib/types";
 
 function formatLatency(ms: number): string {
@@ -116,51 +112,107 @@ export default function IndexerTable({ indexers }: { indexers: IndexerStat[] }) 
 
           {/* Desktop table */}
           <div className="mt-4 hidden md:block">
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableHeaderCell>Name</TableHeaderCell>
-                  <TableHeaderCell>Protocol</TableHeaderCell>
-                  <TableHeaderCell>Enabled</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Requests</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Avg Latency (ms)</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Last Latency (ms)</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Cached</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Uncached</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Errors</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Actions</TableHeaderCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {indexers.map((ix) => (
-                  <TableRow key={String(ix.id)}>
-                    <TableCell className="font-medium">{ix.name}</TableCell>
-                    <TableCell>{ix.protocol}</TableCell>
-                    <TableCell>
+            <DataTable
+              rows={indexers}
+              getRowId={(ix) => String(ix.id)}
+              searchPlaceholder="Search indexers…"
+              ariaLabel="Per-indexer statistics"
+              filters={{
+                enabled: [
+                  { value: "true", label: "Enabled" },
+                  { value: "false", label: "Disabled" },
+                ],
+                protocol: Array.from(
+                  new Set(indexers.map((ix) => ix.protocol)),
+                ).map((p) => ({ value: p, label: p })),
+              }}
+              columns={
+                [
+                  {
+                    key: "name",
+                    header: "Name",
+                    sortable: true,
+                    cellClassName: "font-medium",
+                  },
+                  {
+                    key: "protocol",
+                    header: "Protocol",
+                    sortable: true,
+                    filterable: true,
+                  },
+                  {
+                    key: "enabled",
+                    header: "Enabled",
+                    sortable: true,
+                    filterable: true,
+                    cell: (ix) => (
                       <Badge variant={ix.enabled ? "success" : "error"}>
                         {ix.enabled ? "Yes" : "No"}
                       </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">{ix.requests}</TableCell>
-                    <TableCell className="text-right">{formatLatency(ix.avg_latency_ms)}</TableCell>
-                    <TableCell className="text-right">{formatLatency(ix.last_latency_ms)}</TableCell>
-                    <TableCell className="text-right">{ix.cached}</TableCell>
-                    <TableCell className="text-right">{ix.uncached}</TableCell>
-                    <TableCell className="text-right">{ix.errors}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleReset(ix.id as number)}
-                        disabled={resetting !== null}
-                        isLoading={resetting === ix.id}
-                      >
-                        Reset
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                    ),
+                  },
+                  {
+                    key: "requests",
+                    header: "Requests",
+                    sortable: true,
+                    cellClassName: "text-right",
+                  },
+                  {
+                    key: "avg_latency_ms",
+                    header: "Avg Latency (ms)",
+                    sortable: true,
+                    accessor: (ix) => ix.avg_latency_ms,
+                    cell: (ix) => formatLatency(ix.avg_latency_ms),
+                    cellClassName: "text-right",
+                  },
+                  {
+                    key: "last_latency_ms",
+                    header: "Last Latency (ms)",
+                    sortable: true,
+                    accessor: (ix) => ix.last_latency_ms,
+                    cell: (ix) => formatLatency(ix.last_latency_ms),
+                    cellClassName: "text-right",
+                  },
+                  {
+                    key: "cached",
+                    header: "Cached",
+                    sortable: true,
+                    cellClassName: "text-right",
+                  },
+                  {
+                    key: "uncached",
+                    header: "Uncached",
+                    sortable: true,
+                    cellClassName: "text-right",
+                  },
+                  {
+                    key: "errors",
+                    header: "Errors",
+                    sortable: true,
+                    cellClassName: "text-right",
+                  },
+                  {
+                    key: "actions",
+                    header: "Actions",
+                    searchable: false,
+                    sortable: false,
+                    cell: (ix) => (
+                      <div className="text-right">
+                        <Button
+                          variant="ghost"
+                          onClick={() => handleReset(ix.id as number)}
+                          disabled={resetting !== null}
+                          isLoading={resetting === ix.id}
+                        >
+                          Reset
+                        </Button>
+                      </div>
+                    ),
+                    cellClassName: "text-right",
+                  },
+                ] satisfies DataTableColumn<IndexerStat>[]
+              }
+            />
           </div>
         </>
       )}

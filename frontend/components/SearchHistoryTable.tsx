@@ -1,14 +1,12 @@
+"use client";
+
 import { Card } from "@/components/Card";
 import { Title } from "@/components/Title";
 import { Text } from "@/components/Text";
 import {
-  Table,
-  TableHead,
-  TableHeaderCell,
-  TableBody,
-  TableRow,
-  TableCell,
-} from "@/components/Table";
+  DataTable,
+  type DataTableColumn,
+} from "@/components/DataTable";
 import type { SearchRecord } from "@/lib/types";
 
 function formatRelativeUpdated(ts: number): string {
@@ -75,42 +73,71 @@ export default function SearchHistoryTable({ searches }: { searches: SearchRecor
 
           {/* Desktop table */}
           <div className="mt-4 hidden md:block">
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableHeaderCell>Query</TableHeaderCell>
-                  <TableHeaderCell>Type</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Latency (ms)</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Cached</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Uncached</TableHeaderCell>
-                  <TableHeaderCell className="text-right">Indexers</TableHeaderCell>
-                  <TableHeaderCell className="text-right">When</TableHeaderCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {searches.map((s, i) => (
-                  <TableRow key={`${s.ts}-${i}`}>
-                    <TableCell className="font-medium">{s.query ?? "—"}</TableCell>
-                    <TableCell>{s.search_type ?? "—"}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatValue(s.latency_ms)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatValue(s.torbox_cached)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatValue(s.torbox_uncached)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatValue(s.indexer_count)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatRelativeUpdated(s.ts * 1000)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <DataTable
+              rows={searches}
+              getRowId={(s, i) => `${s.ts}-${i}`}
+              searchPlaceholder="Search recent searches…"
+              ariaLabel="Recent searches"
+              filters={{
+                search_type: Array.from(
+                  new Set(searches.map((s) => s.search_type).filter(Boolean) as string[]),
+                ).map((t) => ({ value: t, label: t })),
+              }}
+              columns={
+                [
+                  {
+                    key: "query",
+                    header: "Query",
+                    sortable: true,
+                    cell: (s) => s.query ?? "—",
+                    cellClassName: "font-medium",
+                  },
+                  {
+                    key: "search_type",
+                    header: "Type",
+                    sortable: true,
+                    filterable: true,
+                    cell: (s) => s.search_type ?? "—",
+                  },
+                  {
+                    key: "latency_ms",
+                    header: "Latency (ms)",
+                    sortable: true,
+                    cellClassName: "text-right tabular-nums",
+                    cell: (s) => formatValue(s.latency_ms),
+                  },
+                  {
+                    key: "torbox_cached",
+                    header: "Cached",
+                    sortable: true,
+                    cellClassName: "text-right tabular-nums",
+                    cell: (s) => formatValue(s.torbox_cached),
+                  },
+                  {
+                    key: "torbox_uncached",
+                    header: "Uncached",
+                    sortable: true,
+                    cellClassName: "text-right tabular-nums",
+                    cell: (s) => formatValue(s.torbox_uncached),
+                  },
+                  {
+                    key: "indexer_count",
+                    header: "Indexers",
+                    sortable: true,
+                    cellClassName: "text-right tabular-nums",
+                    cell: (s) => formatValue(s.indexer_count),
+                  },
+                  {
+                    key: "ts",
+                    header: "When",
+                    sortable: true,
+                    accessor: (s) => s.ts,
+                    cell: (s) => formatRelativeUpdated(s.ts * 1000),
+                    cellClassName: "text-right tabular-nums",
+                  },
+                ] satisfies DataTableColumn<SearchRecord>[]
+              }
+            />
           </div>
         </>
       )}
